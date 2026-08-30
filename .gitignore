@@ -1,0 +1,160 @@
+# ====================
+# Tauri 2
+# ====================
+src-tauri/target/
+src-tauri/.cargo/
+src-tauri/build/
+src-tauri/dist/
+
+src-tauri/tauri.conf.json
+src-tauri/.env
+src-tauri/.env.local
+
+src-tauri/dev-*
+*.pem
+*.key
+*.crt
+
+# ====================
+# Rust
+# ====================
+target/
+debug/
+release/
+*.rs.bk
+*.rlib
+*.profdata
+*.pdb
+*.dSYM
+*.dwp
+*.o
+*.so
+*.dylib
+*.dll
+*.exe
+*.exp
+*.lib
+
+# ====================
+# React
+# ====================
+node_modules/
+.npm/
+.yarn/
+.pnpm-store/
+
+dist/
+dist-ssr/
+build/
+*.local
+
+# ====================
+# SQLite
+# ====================
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.sqlite-journal
+*.wal
+*.shm
+
+app.db
+src-tauri/*.db
+src-tauri/*.sqlite
+
+*.backup
+*.bak
+
+test-data/
+*.test.db
+*.test.sqlite
+
+# ====================
+# Migrations
+# ====================
+src-tauri/migrations/*.sql
+!src-tauri/migrations/001_initial.sql
+
+# ====================
+# Environment
+# ====================
+.env
+.env.*
+!.env.example
+
+# ====================
+# IDE/Editors
+# ====================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+.vscode/launch.json
+.vscode/settings.json
+.idea/workspace.xml
+
+# ====================
+# Logs
+# ====================
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ====================
+# OS
+# ====================
+.DS_Store
+Thumbs.db
+*.tmp
+*.temp
+.cache/
+
+# ====================
+# Tauri builds
+# ====================
+src-tauri/target/release/bundle/
+*.dmg
+*.deb
+*.rpm
+*.AppImage
+*.msi
+*.exe
+*.tar.gz
+*.zip
+
+# ====================
+# Frontend temp files
+# ====================
+*.tsbuildinfo
+.eslintcache
+.prettiercache
+.parcel-cache/
+.next/
+.nuxt/
+*.css.map
+*.js.map
+
+# ====================
+# Tests
+# ====================
+coverage/
+.nyc_output/
+
+# ====================
+# Others
+# ====================
+*.pid
+*.seed
+*.pid.lock
+*.sock
+
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+!Cargo.lock
