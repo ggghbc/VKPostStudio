@@ -27,6 +27,9 @@ import {
 	ExternalLink,
 	ClipboardCheck,
 	GripVertical,
+	LayoutGrid,
+	SlidersHorizontal,
+	Cloud,
 } from "lucide-react";
 import {
 	format,
@@ -68,6 +71,7 @@ interface AttachmentItem {
 	size_bytes: number;
 	local_path?: string;
 	vk_attachment_string?: string;
+	thumb_data?: string;
 }
 
 interface PostItem {
@@ -77,6 +81,7 @@ interface PostItem {
 	status: string;
 	error_message?: string;
 	attachments_count: number;
+	attachments_view_mode: string;
 	attachments: AttachmentItem[];
 }
 
@@ -117,6 +122,9 @@ export default function App() {
 	);
 
 	const [queue, setQueue] = useState<PostItem[]>([]);
+	const [activeQueueTab, setActiveQueueTab] = useState<"local" | "vk">(
+		"local",
+	);
 	const [expandedPostIds, setExpandedPostIds] = useState<number[]>([]);
 	const [nextSlotDisplay, setNextSlotDisplay] = useState<string>("Расчет...");
 	const [isSyncingVk, setIsSyncingVk] = useState(false);
@@ -129,6 +137,11 @@ export default function App() {
 	const [draggedFileIndex, setDraggedFileIndex] = useState<number | null>(
 		null,
 	);
+
+	// Стиль отображения вложений: сетка (grid) по умолчанию
+	const [attachmentsViewMode, setAttachmentsViewMode] = useState<
+		"grid" | "carousel"
+	>("grid");
 
 	// Модалка полноразмерного просмотра изображения (Lightbox)
 	const [fullViewImage, setFullViewImage] = useState<string | null>(null);
@@ -306,7 +319,7 @@ export default function App() {
 		updateNextSlotPreview();
 	}, [selectedTargetId, selectedPatternId, queue]);
 
-	// Фоновый слушатель буфера обмена для автоматического обновления токена в 1 клик
+	// Фоновый слушатель буфера обмена для автоматического обновления токена
 	useEffect(() => {
 		let timer: any = null;
 		if (isAutoListeningClipboard) {
@@ -425,7 +438,6 @@ export default function App() {
 			document.removeEventListener("mousedown", handleClickOutside);
 	}, []);
 
-	// Запуск браузера для авторизации
 	const handleOpenBrowserForLogin = async () => {
 		try {
 			await invoke("open_vk_auth_browser");
@@ -509,7 +521,6 @@ export default function App() {
 		}
 	};
 
-	// Drag & Drop сортировка прикрепленных файлов
 	const handleDragStartItem = (index: number) => {
 		setDraggedFileIndex(index);
 	};
@@ -580,7 +591,6 @@ export default function App() {
 		}
 
 		try {
-			// Порядок filePaths в точности совпадает с визуальным порядком карточек
 			await invoke("add_post_to_queue", {
 				targetId: selectedTargetId,
 				patternId: selectedPatternId,
@@ -589,6 +599,7 @@ export default function App() {
 				closeComments: !commentsOnPost,
 				muteNotifications: !notifyFollowers,
 				markAsAds: adFromCreator,
+				attachmentsViewMode,
 				customScheduledAt: customIso,
 				filePaths: attachedFiles.map((f) => f.path),
 			});
@@ -604,8 +615,19 @@ export default function App() {
 		}
 	};
 
-	const handleDeletePost = async (id: number) => {
-		await invoke("delete_post", { postId: id });
+	// Удаление только локального поста (до отправки в ВК)
+	const handleDeleteLocalPost = async (id: number) => {
+		await invoke("delete_local_post", { postId: id });
+		if (selectedTargetId) {
+			syncVkQueue(selectedTargetId, false);
+		}
+	};
+
+	// Удаление поста из отложки ВКонтакте
+	const handleDeleteVkPost = async (id: number) => {
+		if (!confirm("Удалить этот отложенный пост со стены ВКонтакте?"))
+			return;
+		await invoke("delete_vk_post", { postId: id });
 		if (selectedTargetId) {
 			syncVkQueue(selectedTargetId, false);
 		}
@@ -706,6 +728,16 @@ export default function App() {
 		end: resCalendarEnd,
 	});
 
+	// Разделение очереди на локальные посты и посты в отложке ВК
+	const localPosts = queue.filter(
+		(p) => p.status === "queued" || p.status === "failed",
+	);
+	const vkDelayedPosts = queue.filter(
+		(p) => p.status === "transferred_to_vk",
+	);
+	const displayedPosts =
+		activeQueueTab === "local" ? localPosts : vkDelayedPosts;
+
 	return (
 		<div className="flex flex-col h-screen bg-slate-950 text-slate-100">
 			{/* Шапка */}
@@ -742,7 +774,6 @@ export default function App() {
 									))}
 								</select>
 
-								{/* Быстрое обновление токена в 1 клик */}
 								<button
 									onClick={handleOpenBrowserForLogin}
 									className="p-1.5 rounded-lg text-slate-400 hover:text-blue-400 hover:bg-slate-800 transition-colors"
@@ -765,7 +796,7 @@ export default function App() {
 							</span>
 						)}
 
-						{/* Кнопка входа видна ТОЛЬКО если вход еще не совершен */}
+						{/* Кнопка «Войти через VK» скрывается, если аккаунт уже привязан */}
 						{accounts.length === 0 && (
 							<button
 								onClick={() => setShowTokenModal(true)}
@@ -776,7 +807,6 @@ export default function App() {
 							</button>
 						)}
 
-						{/* Кнопка добавления токена (аккуратный плюс) */}
 						<button
 							onClick={() => {
 								setIsAutoListeningClipboard(false);
@@ -943,7 +973,6 @@ export default function App() {
 												</div>
 											)}
 
-											{/* Индикатор позиции */}
 											<span className="absolute bottom-1.5 left-1.5 px-1.5 py-0.5 rounded bg-black/70 text-[9px] font-mono text-slate-300 pointer-events-none backdrop-blur-sm">
 												#{idx + 1}
 											</span>
@@ -988,8 +1017,53 @@ export default function App() {
 						</button>
 
 						{isSettingsOpen && (
-							<div className="p-3 pt-0 space-y-3 border-t border-slate-800/60">
+							<div className="p-3 pt-0 space-y-3.5 border-t border-slate-800/60">
+								{/* Стиль отображения вложений (Сетка / Карусель) */}
 								<div className="flex items-center justify-between pt-2">
+									<div className="flex flex-col">
+										<span className="text-xs font-medium text-slate-200">
+											Стиль отображения медиа
+										</span>
+										<span className="text-[11px] text-slate-500">
+											Как изображения отображаются в ленте
+										</span>
+									</div>
+									<div className="flex items-center bg-slate-800 border border-slate-700 rounded-lg p-0.5">
+										<button
+											onClick={() =>
+												setAttachmentsViewMode("grid")
+											}
+											className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+												attachmentsViewMode === "grid"
+													? "bg-blue-600 text-white shadow-sm"
+													: "text-slate-400 hover:text-slate-200"
+											}`}
+											title="Сетка (по умолчанию)"
+										>
+											<LayoutGrid className="h-3.5 w-3.5" />
+											<span>Сетка</span>
+										</button>
+										<button
+											onClick={() =>
+												setAttachmentsViewMode(
+													"carousel",
+												)
+											}
+											className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+												attachmentsViewMode ===
+												"carousel"
+													? "bg-blue-600 text-white shadow-sm"
+													: "text-slate-400 hover:text-slate-200"
+											}`}
+											title="Карусель"
+										>
+											<SlidersHorizontal className="h-3.5 w-3.5" />
+											<span>Карусель</span>
+										</button>
+									</div>
+								</div>
+
+								<div className="flex items-center justify-between">
 									<span className="text-xs font-medium text-slate-200">
 										Комментарии к записи
 									</span>
@@ -1289,79 +1363,108 @@ export default function App() {
 					</div>
 				</section>
 
-				{/* Правая панель: Очередь публикаций */}
+				{/* Правая панель: Раздельные вкладки очереди */}
 				<section className="flex flex-col w-1/2 p-6 overflow-hidden bg-slate-950/40">
 					<div className="mb-4 flex items-center justify-between">
+						{/* Переключатель вкладок очередей */}
+						<div className="flex items-center bg-slate-900 border border-slate-800 rounded-xl p-1 gap-1">
+							<button
+								onClick={() => setActiveQueueTab("local")}
+								className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+									activeQueueTab === "local"
+										? "bg-blue-600 text-white shadow-md shadow-blue-600/25"
+										: "text-slate-400 hover:text-slate-200"
+								}`}
+							>
+								<Clock className="h-3.5 w-3.5" />
+								<span>
+									Локальная очередь ({localPosts.length})
+								</span>
+							</button>
+
+							<button
+								onClick={() => setActiveQueueTab("vk")}
+								className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+									activeQueueTab === "vk"
+										? "bg-emerald-600 text-white shadow-md shadow-emerald-600/25"
+										: "text-slate-400 hover:text-slate-200"
+								}`}
+							>
+								<Cloud className="h-3.5 w-3.5" />
+								<span>
+									Отложка ВК ({vkDelayedPosts.length})
+								</span>
+							</button>
+						</div>
+
 						<div className="flex items-center gap-2">
-							<div>
-								<h2 className="text-sm font-semibold tracking-wide text-slate-300">
-									ОЧЕРЕДЬ ПУБЛИКАЦИИ
-								</h2>
-								<p className="text-xs text-slate-500 mt-0.5">
-									В списке: {queue.length} шт.{" "}
-									{isGroupTokenAuth && (
-										<span className="text-blue-400/80">
-											• (локальный учет отложки)
-										</span>
-									)}
-								</p>
-							</div>
 							<button
 								onClick={() =>
 									selectedTargetId &&
 									syncVkQueue(selectedTargetId, true)
 								}
 								disabled={isSyncingVk}
-								className="p-1.5 rounded-lg text-slate-400 hover:text-blue-400 hover:bg-slate-800 transition-colors"
+								className="p-2 rounded-xl text-slate-400 hover:text-blue-400 bg-slate-900 border border-slate-800 hover:border-slate-700 transition-colors"
 								title="Синхронизировать с отложкой ВК"
 							>
 								<RefreshCw
 									className={`h-4 w-4 ${isSyncingVk ? "animate-spin text-blue-400" : ""}`}
 								/>
 							</button>
-						</div>
 
-						<button
-							onClick={handleStartTransfer}
-							disabled={
-								isTransferring ||
-								queue.filter((p) => p.status === "queued")
-									.length === 0
-							}
-							className="flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-40 disabled:pointer-events-none transition-all shadow-lg shadow-emerald-600/20"
-						>
-							{isTransferring ? (
-								<>
-									<RefreshCw className="h-4 w-4 animate-spin" />
-									<span>
-										{transferProgress || "Синхронизация..."}
-									</span>
-								</>
-							) : (
-								<>
-									<Send className="h-4 w-4" />
-									<span>Отправить в очередь ВК</span>
-								</>
+							{activeQueueTab === "local" && (
+								<button
+									onClick={handleStartTransfer}
+									disabled={
+										isTransferring ||
+										localPosts.filter(
+											(p) => p.status === "queued",
+										).length === 0
+									}
+									className="flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-500 disabled:opacity-40 disabled:pointer-events-none transition-all shadow-lg shadow-emerald-600/20"
+								>
+									{isTransferring ? (
+										<>
+											<RefreshCw className="h-4 w-4 animate-spin" />
+											<span>
+												{transferProgress ||
+													"Отправка..."}
+											</span>
+										</>
+									) : (
+										<>
+											<Send className="h-4 w-4" />
+											<span>Отправить в очередь ВК</span>
+										</>
+									)}
+								</button>
 							)}
-						</button>
+						</div>
 					</div>
 
 					<div className="flex-1 overflow-y-auto space-y-2.5 pr-1">
-						{queue.length === 0 ? (
+						{displayedPosts.length === 0 ? (
 							<div className="flex flex-col items-center justify-center h-56 border border-dashed border-slate-800/80 rounded-2xl text-slate-500 text-xs">
 								<Clock className="h-8 w-8 text-slate-700 mb-2" />
 								<span className="font-medium text-slate-400">
-									Очередь чиста
+									{activeQueueTab === "local"
+										? "Локальная очередь пуста"
+										: "В отложке ВК нет постов"}
 								</span>
 								<span className="mt-1 text-slate-600">
-									Созданные посты займут свободные слоты
+									{activeQueueTab === "local"
+										? "Созданные посты появятся здесь до отправки в ВК"
+										: "Синхронизируйте группу, чтобы увидеть отложенные посты на стене"}
 								</span>
 							</div>
 						) : (
-							queue.map((post, index) => {
+							displayedPosts.map((post, index) => {
 								const isExpanded = expandedPostIds.includes(
 									post.id,
 								);
+								const isVkPost =
+									post.status === "transferred_to_vk";
+
 								return (
 									<div
 										key={post.id}
@@ -1393,8 +1496,7 @@ export default function App() {
 															Локально
 														</span>
 													)}
-													{post.status ===
-														"transferred_to_vk" && (
+													{isVkPost && (
 														<span className="flex items-center gap-1 rounded-md bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-400 border border-emerald-500/20">
 															<CheckCircle2 className="h-3 w-3" />{" "}
 															В отложке ВК
@@ -1415,7 +1517,12 @@ export default function App() {
 															{
 																post.attachments_count
 															}{" "}
-															влож.
+															влож. (
+															{post.attachments_view_mode ===
+															"carousel"
+																? "карусель"
+																: "сетка"}
+															)
 														</span>
 													)}
 												</div>
@@ -1434,18 +1541,35 @@ export default function App() {
 											</div>
 
 											<div className="flex items-center gap-1">
-												<button
-													onClick={(e) => {
-														e.stopPropagation();
-														handleDeletePost(
-															post.id,
-														);
-													}}
-													className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition-all"
-													title="Удалить"
-												>
-													<Trash2 className="h-4 w-4" />
-												</button>
+												{/* Раздельные кнопки удаления: для локальных постов и для ВК */}
+												{isVkPost ? (
+													<button
+														onClick={(e) => {
+															e.stopPropagation();
+															handleDeleteVkPost(
+																post.id,
+															);
+														}}
+														className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition-all"
+														title="Удалить пост из отложки ВК"
+													>
+														<Trash2 className="h-4 w-4" />
+													</button>
+												) : (
+													<button
+														onClick={(e) => {
+															e.stopPropagation();
+															handleDeleteLocalPost(
+																post.id,
+															);
+														}}
+														className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition-all"
+														title="Удалить из локальной очереди"
+													>
+														<Trash2 className="h-4 w-4" />
+													</button>
+												)}
+
 												<div className="p-1 text-slate-500">
 													{isExpanded ? (
 														<ChevronUp className="h-4 w-4" />
@@ -1456,7 +1580,6 @@ export default function App() {
 											</div>
 										</div>
 
-										{/* Раскрытый блок с кнопками переноса времени и вложениями */}
 										{isExpanded && (
 											<div className="px-4 pb-4 pt-1 border-t border-slate-800/60 bg-slate-950/30">
 												{post.error_message && (
@@ -1468,8 +1591,8 @@ export default function App() {
 													</div>
 												)}
 
-												{post.status !==
-													"transferred_to_vk" && (
+												{/* Кнопки переноса слота для локальных постов */}
+												{!isVkPost && (
 													<div className="flex items-center gap-2 mb-3 p-2.5 rounded-xl bg-slate-900 border border-slate-800">
 														<span className="text-xs text-slate-400 font-medium">
 															Перенести:
@@ -1507,6 +1630,7 @@ export default function App() {
 													</div>
 												)}
 
+												{/* Отображение вложений из кэша thumbnails */}
 												{post.attachments &&
 												post.attachments.length > 0 ? (
 													<div>
@@ -1520,17 +1644,43 @@ export default function App() {
 																	att,
 																	attIdx,
 																) => (
-																	<QueueAttachmentThumbnail
+																	<div
 																		key={
 																			attIdx
 																		}
-																		att={
-																			att
+																		onClick={() =>
+																			att.thumb_data &&
+																			setFullViewImage(
+																				att.thumb_data,
+																			)
 																		}
-																		onOpenFull={
-																			setFullViewImage
-																		}
-																	/>
+																		className={`h-20 rounded-lg bg-slate-900 border border-slate-800 flex flex-col items-center justify-center overflow-hidden p-1 relative ${
+																			att.thumb_data
+																				? "cursor-pointer hover:border-slate-600"
+																				: ""
+																		}`}
+																	>
+																		{att.thumb_data ? (
+																			<img
+																				src={
+																					att.thumb_data
+																				}
+																				alt={
+																					att.file_name
+																				}
+																				className="h-full w-full object-cover rounded"
+																			/>
+																		) : (
+																			<div className="flex flex-col items-center p-1 text-center">
+																				<FileText className="h-5 w-5 text-blue-400 mb-1" />
+																				<span className="text-[9px] text-slate-400 truncate max-w-full">
+																					{
+																						att.file_name
+																					}
+																				</span>
+																			</div>
+																		)}
+																	</div>
 																),
 															)}
 														</div>
@@ -1745,10 +1895,11 @@ export default function App() {
 
 						<div className="space-y-4">
 							<div className="p-3.5 bg-blue-600/10 border border-blue-500/30 rounded-xl text-xs text-blue-300 leading-relaxed">
-								Нажмите кнопку ниже, разрешите доступ в
-								браузере, затем скопируйте адресную строку
-								(Ctrl+C). Приложение автоматически распознает
-								ссылку или нажмите кнопку «Вставить».
+								Откройте страницу входа, нажмите{" "}
+								<strong>«Разрешить»</strong>, затем скопируйте
+								адресную строку (Ctrl+C). Приложение
+								автоматически распознает ссылку или нажмите
+								кнопку «Вставить».
 							</div>
 
 							<div className="flex gap-2">
@@ -1888,48 +2039,6 @@ export default function App() {
 						</div>
 					</div>
 				</div>
-			)}
-		</div>
-	);
-}
-
-function QueueAttachmentThumbnail({
-	att,
-	onOpenFull,
-}: {
-	att: AttachmentItem;
-	onOpenFull: (url: string) => void;
-}) {
-	const [imgSrc, setImgSrc] = useState<string | null>(null);
-
-	useEffect(() => {
-		if (att.local_path) {
-			invoke<string>("get_file_preview_base64", { path: att.local_path })
-				.then(setImgSrc)
-				.catch(() => setImgSrc(null));
-		}
-	}, [att.local_path]);
-
-	return (
-		<div
-			onClick={() => imgSrc && onOpenFull(imgSrc)}
-			className={`h-20 rounded-lg bg-slate-900 border border-slate-800 flex flex-col items-center justify-center overflow-hidden p-1 relative ${
-				imgSrc ? "cursor-pointer hover:border-slate-600" : ""
-			}`}
-		>
-			{imgSrc ? (
-				<img
-					src={imgSrc}
-					alt={att.file_name}
-					className="h-full w-full object-cover rounded"
-				/>
-			) : (
-				<>
-					<FileText className="h-5 w-5 text-blue-400 mb-1" />
-					<span className="text-[9px] text-slate-400 truncate max-w-full text-center">
-						{att.file_name}
-					</span>
-				</>
 			)}
 		</div>
 	);

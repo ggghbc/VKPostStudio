@@ -334,7 +334,6 @@ impl VkClient {
         let is_group = target_owner_id < 0;
         let group_id_val = target_owner_id.abs().to_string();
 
-        // 1. Получаем URL сервера загрузки
         let mut server_params = vec![
             ("access_token", self.token.clone()),
             ("v", self.v.to_string()),
@@ -347,7 +346,6 @@ impl VkClient {
             .post_vk("photos.getWallUploadServer", server_params)
             .await?;
 
-        // 2. Загружаем файл на сервер ВКонтакте в multipart/form-data
         let mime_type = match file_path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase().as_str() {
             "png" => "image/png",
             "webp" => "image/webp",
@@ -399,7 +397,6 @@ impl VkClient {
             .ok_or_else(|| anyhow!("Ответ загрузчика не содержит hash: {:?}", upload_raw))?
             .to_string();
 
-        // 3. Сохраняем фото на стене
         let mut save_params = vec![
             ("access_token", self.token.clone()),
             ("v", self.v.to_string()),
@@ -436,6 +433,7 @@ impl VkClient {
         close_comments: bool,
         mute_notifications: bool,
         mark_as_ads: bool,
+        attachments_view_mode: &str,
         guid: &str,
     ) -> Result<i64> {
         let attachments_str = attachments.join(",");
@@ -457,6 +455,8 @@ impl VkClient {
 
         if !attachments_str.is_empty() {
             params.push(("attachments", attachments_str));
+            // Сетка или карусель (grid / carousel)
+            params.push(("attachments_view_mode", attachments_view_mode.to_string()));
         }
 
         let res: WallPostResponse = self.post_vk("wall.post", params).await?;

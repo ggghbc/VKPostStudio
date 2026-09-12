@@ -6,7 +6,9 @@ use serde::{Deserialize, Serialize};
 use services::pattern_engine::{PatternConfig, PatternEngine};
 use services::transfer_worker::TransferWorker;
 use sqlx::{sqlite::SqlitePoolOptions, Row, SqlitePool};
+use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::{Duration, SystemTime};
 use tauri::{AppHandle, Manager, State};
 use tokio::sync::Mutex;
 use vk::client::{TokenOwner, VkClient};
@@ -47,6 +49,7 @@ pub struct AttachmentDto {
     pub size_bytes: i64,
     pub local_path: Option<String>,
     pub vk_attachment_string: Option<String>,
+    pub thumb_data: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -57,6 +60,7 @@ pub struct PostDto {
     pub status: String,
     pub error_message: Option<String>,
     pub attachments_count: i64,
+    pub attachments_view_mode: String,
     pub attachments: Vec<AttachmentDto>,
 }
 
@@ -103,6 +107,34 @@ fn extract_clean_token(raw_input: &str) -> String {
     }
     let token = s.split('&').next().unwrap_or("").trim();
     token.trim_matches(|c| c == '"' || c == '\'' || c == ';' || c == '&').to_string()
+}
+
+fn get_thumbs_dir(app: &AppHandle) -> PathBuf {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .unwrap_or_else(|_| PathBuf::from("."))
+        .join("thumbnails");
+    std::fs::create_dir_all(&dir).ok();
+    dir
+}
+
+// Очистка кэша миниатюр старше 30 дней
+fn cleanup_old_thumbnails(thumbs_dir: &PathBuf) {
+    let thirty_days = Duration::from_secs(30 * 24 * 60 * 60);
+    if let Ok(entries) = std::fs::read_dir(thumbs_dir) {
+        for entry in entries.flatten() {
+            if let Ok(meta) = entry.metadata() {
+                if let Ok(modified) = meta.modified() {
+                    if let Ok(elapsed) = SystemTime::now().duration_since(modified) {
+                        if elapsed > thirty_days {
+                            let _ = std::fs::remove_file(entry.path());
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[tauri::command]
@@ -418,9 +450,13 @@ async fn create_pattern(
 }
 
 #[tauri::command]
-async fn get_queue(target_id: i64, state: State<'_, AppState>) -> Result<Vec<PostDto>, String> {
+async fn get_queue(
+    target_id: i64,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Vec<PostDto>, String> {
     let posts_rows = sqlx::query(
-        "SELECT id, text, scheduled_at_utc, status, error_message FROM posts 
+        "SELECT id, text, scheduled_at_utc, status, error_message, attachments_view_mode FROM posts 
          WHERE target_id = ? AND status != 'archived' 
          ORDER BY scheduled_at_utc ASC"
     )
@@ -429,7 +465,9 @@ async fn get_queue(target_id: i64, state: State<'_, AppState>) -> Result<Vec<Pos
     .await
     .map_err(|e| e.to_string())?;
 
+    let thumbs_dir = get_thumbs_dir(&app);
     let mut result = Vec::new();
+
     for r in posts_rows {
         let post_id: i64 = r.get("id");
         let att_rows = sqlx::query(
@@ -441,16 +479,37 @@ async fn get_queue(target_id: i64, state: State<'_, AppState>) -> Result<Vec<Pos
         .await
         .unwrap_or_default();
 
-        let attachments: Vec<AttachmentDto> = att_rows
-            .into_iter()
-            .map(|a| AttachmentDto {
-                id: a.get("id"),
+        let mut attachments = Vec::new();
+        for a in att_rows {
+            let att_id: i64 = a.get("id");
+            let local_path: Option<String> = a.get("local_path");
+
+            // Ищем миниатюру: сначала в кэше thumbnails, затем по локальному пути
+            let thumb_path = thumbs_dir.join(format!("{}.thumb", att_id));
+            let thumb_data = if thumb_path.exists() {
+                std::fs::read_to_string(&thumb_path).ok()
+            } else if let Some(ref lp) = local_path {
+                let p = PathBuf::from(lp);
+                if p.exists() {
+                    get_file_preview_base64(lp.clone()).await.ok()
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            attachments.push(AttachmentDto {
+                id: att_id,
                 file_name: a.get("file_name"),
                 size_bytes: a.get("size_bytes"),
-                local_path: a.get("local_path"),
+                local_path,
                 vk_attachment_string: a.get("vk_attachment_string"),
-            })
-            .collect();
+                thumb_data,
+            });
+        }
+
+        let mode: String = r.try_get("attachments_view_mode").unwrap_or_else(|_| "grid".to_string());
 
         result.push(PostDto {
             id: post_id,
@@ -459,6 +518,7 @@ async fn get_queue(target_id: i64, state: State<'_, AppState>) -> Result<Vec<Pos
             status: r.get("status"),
             error_message: r.get("error_message"),
             attachments_count: attachments.len() as i64,
+            attachments_view_mode: mode,
             attachments,
         });
     }
@@ -469,6 +529,7 @@ async fn get_queue(target_id: i64, state: State<'_, AppState>) -> Result<Vec<Pos
 #[tauri::command]
 async fn sync_vk_delayed_posts(
     target_id: i64,
+    app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<SyncResultDto, String> {
     let target_row = sqlx::query("SELECT account_id, owner_id FROM targets WHERE id = ?")
@@ -523,10 +584,10 @@ async fn sync_vk_delayed_posts(
                     let new_pid = sqlx::query(
                         "INSERT INTO posts (
                             account_id, target_id, pattern_id, text, scheduled_at_utc, guid,
-                            status, vk_post_id, signed, close_comments, mute_notifications, mark_as_ads
+                            status, vk_post_id, signed, close_comments, mute_notifications, mark_as_ads, attachments_view_mode
                         ) VALUES (
                             ?, ?, COALESCE((SELECT id FROM patterns ORDER BY id ASC LIMIT 1), 1), ?, ?, ?,
-                            'transferred_to_vk', ?, 0, 0, 0, 0
+                            'transferred_to_vk', ?, 0, 0, 0, 0, 'grid'
                         ) RETURNING id"
                     )
                     .bind(account_id)
@@ -586,7 +647,7 @@ async fn sync_vk_delayed_posts(
         }
     }
 
-    let posts = get_queue(target_id, state).await?;
+    let posts = get_queue(target_id, app, state).await?;
     Ok(SyncResultDto {
         posts,
         group_auth_restricted,
@@ -722,8 +783,20 @@ async fn reschedule_post_custom(
     Ok(())
 }
 
+// Удаление поста только из локальной очереди
 #[tauri::command]
-async fn delete_post(post_id: i64, state: State<'_, AppState>) -> Result<(), String> {
+async fn delete_local_post(post_id: i64, state: State<'_, AppState>) -> Result<(), String> {
+    sqlx::query("UPDATE posts SET status = 'archived' WHERE id = ?")
+        .bind(post_id)
+        .execute(&state.db)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+// Удаление поста из отложки ВКонтакте
+#[tauri::command]
+async fn delete_vk_post(post_id: i64, state: State<'_, AppState>) -> Result<(), String> {
     let post = sqlx::query("SELECT target_id, vk_post_id FROM posts WHERE id = ?")
         .bind(post_id)
         .fetch_optional(&state.db)
@@ -773,8 +846,10 @@ async fn add_post_to_queue(
     close_comments: bool,
     mute_notifications: bool,
     mark_as_ads: bool,
+    attachments_view_mode: String,
     custom_scheduled_at: Option<String>,
     file_paths: Vec<String>,
+    app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<i64, String> {
     let db = &state.db;
@@ -834,8 +909,8 @@ async fn add_post_to_queue(
     let post_id = sqlx::query(
         "INSERT INTO posts (
             account_id, target_id, pattern_id, text, scheduled_at_utc, guid,
-            signed, close_comments, mute_notifications, mark_as_ads
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id"
+            signed, close_comments, mute_notifications, mark_as_ads, attachments_view_mode
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id"
     )
     .bind(account_id)
     .bind(target_id)
@@ -847,28 +922,38 @@ async fn add_post_to_queue(
     .bind(if close_comments { 1 } else { 0 })
     .bind(if mute_notifications { 1 } else { 0 })
     .bind(if mark_as_ads { 1 } else { 0 })
+    .bind(&attachments_view_mode)
     .fetch_one(&mut *tx)
     .await
     .map_err(|e| e.to_string())?
     .get::<i64, _>("id");
+
+    let thumbs_dir = get_thumbs_dir(&app);
 
     for (idx, path_str) in file_paths.iter().enumerate() {
         let p = std::path::Path::new(path_str);
         let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("file");
         let size = std::fs::metadata(p).map(|m| m.len() as i64).unwrap_or(0);
 
-        sqlx::query(
+        let att_id = sqlx::query(
             "INSERT INTO attachments (post_id, local_path, file_name, size_bytes, attachment_kind, order_index)
-             VALUES (?, ?, ?, ?, 'photo', ?)"
+             VALUES (?, ?, ?, ?, 'photo', ?) RETURNING id"
         )
         .bind(post_id)
         .bind(path_str)
         .bind(name)
         .bind(size)
         .bind(idx as i32)
-        .execute(&mut *tx)
+        .fetch_one(&mut *tx)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())?
+        .get::<i64, _>("id");
+
+        // Создаем и кэшируем постоянную миниатюру
+        if let Ok(b64) = get_file_preview_base64(path_str.clone()).await {
+            let thumb_path = thumbs_dir.join(format!("{}.thumb", att_id));
+            let _ = std::fs::write(&thumb_path, b64);
+        }
     }
 
     tx.commit().await.map_err(|e| e.to_string())?;
@@ -916,6 +1001,9 @@ pub fn run() {
                     .expect("Failed to get app_data_dir");
                 std::fs::create_dir_all(&app_dir).ok();
 
+                let thumbs_dir = app_dir.join("thumbnails");
+                cleanup_old_thumbnails(&thumbs_dir);
+
                 let db_path = app_dir.join("studio.sqlite");
                 let pool = SqlitePoolOptions::new()
                     .max_connections(5)
@@ -941,6 +1029,7 @@ pub fn run() {
                 let _ = sqlx::query("ALTER TABLE posts ADD COLUMN close_comments INTEGER NOT NULL DEFAULT 0").execute(&pool).await;
                 let _ = sqlx::query("ALTER TABLE posts ADD COLUMN mute_notifications INTEGER NOT NULL DEFAULT 0").execute(&pool).await;
                 let _ = sqlx::query("ALTER TABLE posts ADD COLUMN mark_as_ads INTEGER NOT NULL DEFAULT 0").execute(&pool).await;
+                let _ = sqlx::query("ALTER TABLE posts ADD COLUMN attachments_view_mode TEXT NOT NULL DEFAULT 'grid'").execute(&pool).await;
 
                 sqlx::query(
                     "INSERT OR IGNORE INTO patterns (id, name, timezone, times_json, days_json, min_interval_minutes, is_default)
@@ -982,7 +1071,8 @@ pub fn run() {
             get_next_slot_preview,
             reschedule_post_next_slot,
             reschedule_post_custom,
-            delete_post,
+            delete_local_post,
+            delete_vk_post,
             add_post_to_queue,
             start_transfer_pipeline
         ])

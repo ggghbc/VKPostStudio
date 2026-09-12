@@ -17,7 +17,6 @@ impl TransferWorker {
     ) -> Result<()> {
         let result = Self::process_posts(&app, &db, &vk, target_id).await;
 
-        // Гарантированно уведомляем UI о завершении переноса при любом исходе
         let _ = app.emit("transfer-finished", serde_json::json!({
             "success": result.is_ok(),
             "error": result.as_ref().err().map(|e| e.to_string())
@@ -44,9 +43,9 @@ impl TransferWorker {
         let from_group = target_type == "community";
 
         let posts = sqlx::query(
-            "SELECT id, text, scheduled_at_utc, guid, signed, close_comments, mute_notifications, mark_as_ads 
+            "SELECT id, text, scheduled_at_utc, guid, signed, close_comments, mute_notifications, mark_as_ads, attachments_view_mode 
              FROM posts 
-             WHERE target_id = ? AND status = 'queued' 
+             WHERE target_id = ? AND status IN ('queued', 'failed') 
              ORDER BY scheduled_at_utc ASC"
         )
         .bind(target_id)
@@ -67,6 +66,9 @@ impl TransferWorker {
             let close_comments: bool = post.get::<i64, _>("close_comments") == 1;
             let mute_notifications: bool = post.get::<i64, _>("mute_notifications") == 1;
             let mark_as_ads: bool = post.get::<i64, _>("mark_as_ads") == 1;
+            let attachments_view_mode: String = post
+                .try_get("attachments_view_mode")
+                .unwrap_or_else(|_| "grid".to_string());
 
             let scheduled_at = DateTime::parse_from_rfc3339(&sched_utc_str)
                 .map(|dt| dt.with_timezone(&Utc))
@@ -129,8 +131,7 @@ impl TransferWorker {
                             sqlx::query(
                                 "UPDATE attachments SET 
                                     upload_status = 'uploaded', 
-                                    vk_attachment_string = ?, 
-                                    local_path = NULL 
+                                    vk_attachment_string = ? 
                                  WHERE id = ?"
                             )
                             .bind(&vk_string)
@@ -142,11 +143,7 @@ impl TransferWorker {
                         }
                         Err(e) => {
                             let e_str = e.to_string();
-                            let err_msg = if e_str.contains("error 27") || e_str.contains("unavailable with group auth") {
-                                "VK API запрещает загружать фото через токен сообщества (код 27). Требуется токен пользователя-администратора (User Token).".to_string()
-                            } else {
-                                format!("Ошибка загрузки: {}", e_str)
-                            };
+                            let err_msg = format!("Ошибка загрузки: {}", e_str);
 
                             sqlx::query("UPDATE attachments SET upload_status = 'error', error_message = ? WHERE id = ?")
                                 .bind(&err_msg)
@@ -182,6 +179,7 @@ impl TransferWorker {
                     close_comments,
                     mute_notifications,
                     mark_as_ads,
+                    &attachments_view_mode,
                     &guid,
                 )
                 .await;
@@ -206,7 +204,7 @@ impl TransferWorker {
             }
 
             if idx + 1 < total {
-                let jitter = (rand::random::<u64>() % 6) + 4;
+                let jitter = (rand::random::<u64>() % 4) + 2;
                 tokio::time::sleep(Duration::from_secs(jitter)).await;
             }
         }
