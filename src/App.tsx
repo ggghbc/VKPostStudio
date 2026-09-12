@@ -26,10 +26,12 @@ import {
 	RotateCcw,
 	ExternalLink,
 	ClipboardCheck,
-	GripVertical,
 	LayoutGrid,
 	SlidersHorizontal,
 	Cloud,
+	ArrowLeft,
+	ArrowRight,
+	History,
 } from "lucide-react";
 import {
 	format,
@@ -122,9 +124,10 @@ export default function App() {
 	);
 
 	const [queue, setQueue] = useState<PostItem[]>([]);
-	const [activeQueueTab, setActiveQueueTab] = useState<"local" | "vk">(
-		"local",
-	);
+	const [historyPosts, setHistoryPosts] = useState<PostItem[]>([]);
+	const [activeQueueTab, setActiveQueueTab] = useState<
+		"local" | "vk" | "history"
+	>("local");
 	const [expandedPostIds, setExpandedPostIds] = useState<number[]>([]);
 	const [nextSlotDisplay, setNextSlotDisplay] = useState<string>("Расчет...");
 	const [isSyncingVk, setIsSyncingVk] = useState(false);
@@ -134,9 +137,6 @@ export default function App() {
 	const [postText, setPostText] = useState("");
 	const [attachedFiles, setAttachedFiles] = useState<FilePreview[]>([]);
 	const [isDraggingOver, setIsDraggingOver] = useState(false);
-	const [draggedFileIndex, setDraggedFileIndex] = useState<number | null>(
-		null,
-	);
 
 	// Стиль отображения вложений: сетка (grid) по умолчанию
 	const [attachmentsViewMode, setAttachmentsViewMode] = useState<
@@ -248,7 +248,18 @@ export default function App() {
 		}
 	};
 
-	const syncVkQueue = async (targetId: number, isManual = false) => {
+	const loadHistory = async (targetId: number) => {
+		try {
+			const hist = await invoke<PostItem[]>("get_post_history", {
+				targetId,
+			});
+			setHistoryPosts(hist);
+		} catch (e) {
+			console.error("Ошибка загрузки истории:", e);
+		}
+	};
+
+	const syncVkQueue = async (targetId: number) => {
 		setIsSyncingVk(true);
 		try {
 			const res = await invoke<SyncResult>("sync_vk_delayed_posts", {
@@ -256,24 +267,13 @@ export default function App() {
 			});
 			setQueue(res.posts);
 			setIsGroupTokenAuth(res.group_auth_restricted);
-
-			if (isManual) {
-				if (res.group_auth_restricted) {
-					alert(
-						"VK запрещает чтение стены для токена сообщества (код 27). Отложка сохраняется локально в приложении. Для непрерывности очереди укажите дату первого поста вручную.",
-					);
-				} else {
-					const vkCount = res.posts.filter(
-						(p) => p.status === "transferred_to_vk",
-					).length;
-					alert(`Синхронизировано. В отложке VK: ${vkCount} шт.`);
-				}
-			}
+			loadHistory(targetId);
 		} catch (e) {
 			console.error("Ошибка синхронизации:", e);
 			try {
 				const q = await invoke<PostItem[]>("get_queue", { targetId });
 				setQueue(q);
+				loadHistory(targetId);
 			} catch {}
 		} finally {
 			setIsSyncingVk(false);
@@ -311,7 +311,7 @@ export default function App() {
 
 	useEffect(() => {
 		if (selectedTargetId) {
-			syncVkQueue(selectedTargetId, false);
+			syncVkQueue(selectedTargetId);
 		}
 	}, [selectedTargetId]);
 
@@ -408,7 +408,7 @@ export default function App() {
 			setIsTransferring(false);
 			setTransferProgress(null);
 			if (selectedTargetId) {
-				syncVkQueue(selectedTargetId, false);
+				syncVkQueue(selectedTargetId);
 			}
 			if (event.payload?.error) {
 				alert(event.payload.error);
@@ -521,25 +521,21 @@ export default function App() {
 		}
 	};
 
-	const handleDragStartItem = (index: number) => {
-		setDraggedFileIndex(index);
-	};
-
-	const handleDragOverItem = (e: React.DragEvent, index: number) => {
-		e.preventDefault();
-		if (draggedFileIndex === null || draggedFileIndex === index) return;
-
+	const moveFile = (from: number, to: number) => {
+		if (
+			from === to ||
+			from < 0 ||
+			to < 0 ||
+			from >= attachedFiles.length ||
+			to >= attachedFiles.length
+		)
+			return;
 		setAttachedFiles((prev) => {
 			const updated = [...prev];
-			const [movedItem] = updated.splice(draggedFileIndex, 1);
-			updated.splice(index, 0, movedItem);
+			const [moved] = updated.splice(from, 1);
+			updated.splice(to, 0, moved);
 			return updated;
 		});
-		setDraggedFileIndex(index);
-	};
-
-	const handleDragEndItem = () => {
-		setDraggedFileIndex(null);
 	};
 
 	const handleCreatePattern = async () => {
@@ -608,28 +604,34 @@ export default function App() {
 			setAttachedFiles([]);
 			setIsManualTime(false);
 			if (selectedTargetId) {
-				syncVkQueue(selectedTargetId, false);
+				syncVkQueue(selectedTargetId);
 			}
 		} catch (e) {
 			alert("Ошибка добавления поста: " + e);
 		}
 	};
 
-	// Удаление только локального поста (до отправки в ВК)
 	const handleDeleteLocalPost = async (id: number) => {
 		await invoke("delete_local_post", { postId: id });
 		if (selectedTargetId) {
-			syncVkQueue(selectedTargetId, false);
+			syncVkQueue(selectedTargetId);
 		}
 	};
 
-	// Удаление поста из отложки ВКонтакте
 	const handleDeleteVkPost = async (id: number) => {
 		if (!confirm("Удалить этот отложенный пост со стены ВКонтакте?"))
 			return;
 		await invoke("delete_vk_post", { postId: id });
 		if (selectedTargetId) {
-			syncVkQueue(selectedTargetId, false);
+			syncVkQueue(selectedTargetId);
+		}
+	};
+
+	const handleDeleteHistoryPost = async (id: number) => {
+		if (!confirm("Удалить запись из истории публикаций?")) return;
+		await invoke("delete_history_post", { postId: id });
+		if (selectedTargetId) {
+			loadHistory(selectedTargetId);
 		}
 	};
 
@@ -644,7 +646,7 @@ export default function App() {
 				patternId: selectedPatternId,
 			});
 			if (selectedTargetId) {
-				syncVkQueue(selectedTargetId, false);
+				syncVkQueue(selectedTargetId);
 			}
 		} catch (e) {
 			alert("Ошибка переноса: " + e);
@@ -676,7 +678,7 @@ export default function App() {
 			});
 			setRescheduleModalPost(null);
 			if (selectedTargetId) {
-				syncVkQueue(selectedTargetId, false);
+				syncVkQueue(selectedTargetId);
 			}
 		} catch (e) {
 			alert("Ошибка установки времени: " + e);
@@ -728,15 +730,19 @@ export default function App() {
 		end: resCalendarEnd,
 	});
 
-	// Разделение очереди на локальные посты и посты в отложке ВК
 	const localPosts = queue.filter(
 		(p) => p.status === "queued" || p.status === "failed",
 	);
 	const vkDelayedPosts = queue.filter(
 		(p) => p.status === "transferred_to_vk",
 	);
+
 	const displayedPosts =
-		activeQueueTab === "local" ? localPosts : vkDelayedPosts;
+		activeQueueTab === "local"
+			? localPosts
+			: activeQueueTab === "vk"
+				? vkDelayedPosts
+				: historyPosts;
 
 	return (
 		<div className="flex flex-col h-screen bg-slate-950 text-slate-100">
@@ -796,7 +802,6 @@ export default function App() {
 							</span>
 						)}
 
-						{/* Кнопка «Войти через VK» скрывается, если аккаунт уже привязан */}
 						{accounts.length === 0 && (
 							<button
 								onClick={() => setShowTokenModal(true)}
@@ -896,7 +901,7 @@ export default function App() {
 						/>
 					</div>
 
-					{/* Зона загрузки медиа с сортировкой перетаскиванием */}
+					{/* Зона прикрепленных медиа со стрелочной сортировкой */}
 					<div className="flex-1 flex flex-col min-h-[190px]">
 						{attachedFiles.length === 0 ? (
 							<div
@@ -922,8 +927,8 @@ export default function App() {
 								<div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-800 text-xs">
 									<span className="font-semibold text-slate-300">
 										Прикрепленные файлы (
-										{attachedFiles.length}) • перетаскивайте
-										для изменения порядка
+										{attachedFiles.length}) • используйте
+										стрелки для смены порядка
 									</span>
 									<button
 										onClick={handleSelectFiles}
@@ -934,38 +939,34 @@ export default function App() {
 									</button>
 								</div>
 
-								<div className="flex-1 overflow-y-auto grid grid-cols-3 gap-3 pr-1">
+								<div className="flex-1 overflow-y-auto grid grid-cols-3 gap-3 pr-1 select-none">
 									{attachedFiles.map((file, idx) => (
 										<div
 											key={idx}
-											draggable
-											onDragStart={() =>
-												handleDragStartItem(idx)
-											}
-											onDragOver={(e) =>
-												handleDragOverItem(e, idx)
-											}
-											onDragEnd={handleDragEndItem}
-											onClick={() =>
-												file.previewUrl &&
-												setFullViewImage(
-													file.previewUrl,
-												)
-											}
-											className={`group relative h-28 rounded-xl bg-slate-950 border overflow-hidden shadow-md flex items-center justify-center cursor-grab active:cursor-grabbing transition-all ${
-												draggedFileIndex === idx
-													? "opacity-40 border-blue-500 scale-95"
-													: "border-slate-800 hover:border-slate-600"
-											}`}
+											className="group relative h-28 rounded-xl bg-slate-950 border border-slate-800 hover:border-slate-600 overflow-hidden shadow-md flex items-center justify-center transition-all"
 										>
 											{file.isImage && file.previewUrl ? (
 												<img
 													src={file.previewUrl}
 													alt={file.name}
-													className="h-full w-full object-cover pointer-events-none group-hover:scale-105 transition-transform duration-200"
+													onClick={() =>
+														file.previewUrl &&
+														setFullViewImage(
+															file.previewUrl,
+														)
+													}
+													className="h-full w-full object-cover cursor-pointer group-hover:scale-105 transition-transform duration-200"
 												/>
 											) : (
-												<div className="flex flex-col items-center p-2 text-center pointer-events-none">
+												<div
+													onClick={() =>
+														file.previewUrl &&
+														setFullViewImage(
+															file.previewUrl,
+														)
+													}
+													className="flex flex-col items-center p-2 text-center cursor-pointer"
+												>
 													<FileText className="h-7 w-7 text-blue-400 mb-1" />
 													<span className="text-[10px] text-slate-400 truncate max-w-[90px]">
 														{file.name}
@@ -973,12 +974,41 @@ export default function App() {
 												</div>
 											)}
 
-											<span className="absolute bottom-1.5 left-1.5 px-1.5 py-0.5 rounded bg-black/70 text-[9px] font-mono text-slate-300 pointer-events-none backdrop-blur-sm">
+											<span className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-black/70 text-[10px] font-mono text-slate-300 font-bold backdrop-blur-sm">
 												#{idx + 1}
 											</span>
 
-											<div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
-												<GripVertical className="h-5 w-5 text-white/80 drop-shadow" />
+											<div className="absolute inset-x-0 bottom-0 py-1 bg-slate-950/85 backdrop-blur-sm flex items-center justify-between px-1.5 border-t border-slate-800/80">
+												<button
+													disabled={idx === 0}
+													onClick={(e) => {
+														e.stopPropagation();
+														moveFile(idx, idx - 1);
+													}}
+													className="p-1 rounded hover:bg-slate-800 text-slate-300 disabled:opacity-20 disabled:hover:bg-transparent transition-colors"
+													title="Сдвинуть влево"
+												>
+													<ArrowLeft className="h-3 w-3" />
+												</button>
+
+												<span className="text-[9px] font-mono text-slate-400">
+													позиция
+												</span>
+
+												<button
+													disabled={
+														idx ===
+														attachedFiles.length - 1
+													}
+													onClick={(e) => {
+														e.stopPropagation();
+														moveFile(idx, idx + 1);
+													}}
+													className="p-1 rounded hover:bg-slate-800 text-slate-300 disabled:opacity-20 disabled:hover:bg-transparent transition-colors"
+													title="Сдвинуть вправо"
+												>
+													<ArrowRight className="h-3 w-3" />
+												</button>
 											</div>
 
 											<button
@@ -1018,14 +1048,14 @@ export default function App() {
 
 						{isSettingsOpen && (
 							<div className="p-3 pt-0 space-y-3.5 border-t border-slate-800/60">
-								{/* Стиль отображения вложений (Сетка / Карусель) */}
+								{/* Стиль отображения вложений: Сетка / Карусель */}
 								<div className="flex items-center justify-between pt-2">
 									<div className="flex flex-col">
 										<span className="text-xs font-medium text-slate-200">
 											Стиль отображения медиа
 										</span>
 										<span className="text-[11px] text-slate-500">
-											Как изображения отображаются в ленте
+											Вид прикрепленных фото на стене VK
 										</span>
 									</div>
 									<div className="flex items-center bg-slate-800 border border-slate-700 rounded-lg p-0.5">
@@ -1035,10 +1065,9 @@ export default function App() {
 											}
 											className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition-colors ${
 												attachmentsViewMode === "grid"
-													? "bg-blue-600 text-white shadow-sm"
+													? "bg-blue-600 text-white shadow-sm font-semibold"
 													: "text-slate-400 hover:text-slate-200"
 											}`}
-											title="Сетка (по умолчанию)"
 										>
 											<LayoutGrid className="h-3.5 w-3.5" />
 											<span>Сетка</span>
@@ -1052,10 +1081,9 @@ export default function App() {
 											className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition-colors ${
 												attachmentsViewMode ===
 												"carousel"
-													? "bg-blue-600 text-white shadow-sm"
+													? "bg-blue-600 text-white shadow-sm font-semibold"
 													: "text-slate-400 hover:text-slate-200"
 											}`}
-											title="Карусель"
 										>
 											<SlidersHorizontal className="h-3.5 w-3.5" />
 											<span>Карусель</span>
@@ -1363,10 +1391,9 @@ export default function App() {
 					</div>
 				</section>
 
-				{/* Правая панель: Раздельные вкладки очереди */}
+				{/* Правая панель: 3 раздельные вкладки очередей */}
 				<section className="flex flex-col w-1/2 p-6 overflow-hidden bg-slate-950/40">
 					<div className="mb-4 flex items-center justify-between">
-						{/* Переключатель вкладок очередей */}
 						<div className="flex items-center bg-slate-900 border border-slate-800 rounded-xl p-1 gap-1">
 							<button
 								onClick={() => setActiveQueueTab("local")}
@@ -1395,13 +1422,31 @@ export default function App() {
 									Отложка ВК ({vkDelayedPosts.length})
 								</span>
 							</button>
+
+							<button
+								onClick={() => {
+									setActiveQueueTab("history");
+									if (selectedTargetId)
+										loadHistory(selectedTargetId);
+								}}
+								className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+									activeQueueTab === "history"
+										? "bg-purple-600 text-white shadow-md shadow-purple-600/25"
+										: "text-slate-400 hover:text-slate-200"
+								}`}
+							>
+								<History className="h-3.5 w-3.5" />
+								<span>
+									История постов ({historyPosts.length})
+								</span>
+							</button>
 						</div>
 
 						<div className="flex items-center gap-2">
 							<button
 								onClick={() =>
 									selectedTargetId &&
-									syncVkQueue(selectedTargetId, true)
+									syncVkQueue(selectedTargetId)
 								}
 								disabled={isSyncingVk}
 								className="p-2 rounded-xl text-slate-400 hover:text-blue-400 bg-slate-900 border border-slate-800 hover:border-slate-700 transition-colors"
@@ -1418,7 +1463,9 @@ export default function App() {
 									disabled={
 										isTransferring ||
 										localPosts.filter(
-											(p) => p.status === "queued",
+											(p) =>
+												p.status === "queued" ||
+												p.status === "failed",
 										).length === 0
 									}
 									className="flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-500 disabled:opacity-40 disabled:pointer-events-none transition-all shadow-lg shadow-emerald-600/20"
@@ -1449,12 +1496,16 @@ export default function App() {
 								<span className="font-medium text-slate-400">
 									{activeQueueTab === "local"
 										? "Локальная очередь пуста"
-										: "В отложке ВК нет постов"}
+										: activeQueueTab === "vk"
+											? "В отложке ВК нет постов"
+											: "История постов пуста"}
 								</span>
 								<span className="mt-1 text-slate-600">
 									{activeQueueTab === "local"
 										? "Созданные посты появятся здесь до отправки в ВК"
-										: "Синхронизируйте группу, чтобы увидеть отложенные посты на стене"}
+										: activeQueueTab === "vk"
+											? "Синхронизируйте группу, чтобы увидеть отложенные посты на стене"
+											: "Все созданные посты сохраняются здесь"}
 								</span>
 							</div>
 						) : (
@@ -1464,6 +1515,8 @@ export default function App() {
 								);
 								const isVkPost =
 									post.status === "transferred_to_vk";
+								const isHistoryTab =
+									activeQueueTab === "history";
 
 								return (
 									<div
@@ -1509,6 +1562,12 @@ export default function App() {
 															Ошибка
 														</span>
 													)}
+													{post.status ===
+														"archived" && (
+														<span className="rounded-md bg-slate-800 px-2 py-0.5 text-[10px] font-semibold text-slate-400 border border-slate-700">
+															Архив / Завершён
+														</span>
+													)}
 
 													{post.attachments_count >
 														0 && (
@@ -1541,8 +1600,20 @@ export default function App() {
 											</div>
 
 											<div className="flex items-center gap-1">
-												{/* Раздельные кнопки удаления: для локальных постов и для ВК */}
-												{isVkPost ? (
+												{isHistoryTab ? (
+													<button
+														onClick={(e) => {
+															e.stopPropagation();
+															handleDeleteHistoryPost(
+																post.id,
+															);
+														}}
+														className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition-all"
+														title="Удалить запись из истории"
+													>
+														<Trash2 className="h-4 w-4" />
+													</button>
+												) : isVkPost ? (
 													<button
 														onClick={(e) => {
 															e.stopPropagation();
@@ -1591,8 +1662,7 @@ export default function App() {
 													</div>
 												)}
 
-												{/* Кнопки переноса слота для локальных постов */}
-												{!isVkPost && (
+												{activeQueueTab === "local" && (
 													<div className="flex items-center gap-2 mb-3 p-2.5 rounded-xl bg-slate-900 border border-slate-800">
 														<span className="text-xs text-slate-400 font-medium">
 															Перенести:
@@ -1630,7 +1700,6 @@ export default function App() {
 													</div>
 												)}
 
-												{/* Отображение вложений из кэша thumbnails */}
 												{post.attachments &&
 												post.attachments.length > 0 ? (
 													<div>

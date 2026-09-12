@@ -119,7 +119,6 @@ fn get_thumbs_dir(app: &AppHandle) -> PathBuf {
     dir
 }
 
-// Очистка кэша миниатюр старше 30 дней
 fn cleanup_old_thumbnails(thumbs_dir: &PathBuf) {
     let thirty_days = Duration::from_secs(30 * 24 * 60 * 60);
     if let Ok(entries) = std::fs::read_dir(thumbs_dir) {
@@ -484,7 +483,83 @@ async fn get_queue(
             let att_id: i64 = a.get("id");
             let local_path: Option<String> = a.get("local_path");
 
-            // Ищем миниатюру: сначала в кэше thumbnails, затем по локальному пути
+            let thumb_path = thumbs_dir.join(format!("{}.thumb", att_id));
+            let thumb_data = if thumb_path.exists() {
+                std::fs::read_to_string(&thumb_path).ok()
+            } else if let Some(ref lp) = local_path {
+                let p = PathBuf::from(lp);
+                if p.exists() {
+                    get_file_preview_base64(lp.clone()).await.ok()
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            attachments.push(AttachmentDto {
+                id: att_id,
+                file_name: a.get("file_name"),
+                size_bytes: a.get("size_bytes"),
+                local_path,
+                vk_attachment_string: a.get("vk_attachment_string"),
+                thumb_data,
+            });
+        }
+
+        let mode: String = r.try_get("attachments_view_mode").unwrap_or_else(|_| "grid".to_string());
+
+        result.push(PostDto {
+            id: post_id,
+            text: r.get("text"),
+            scheduled_at_utc: r.get("scheduled_at_utc"),
+            status: r.get("status"),
+            error_message: r.get("error_message"),
+            attachments_count: attachments.len() as i64,
+            attachments_view_mode: mode,
+            attachments,
+        });
+    }
+
+    Ok(result)
+}
+
+// Получение полной истории всех постов цели (включая архивированные/завершенные)
+#[tauri::command]
+async fn get_post_history(
+    target_id: i64,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Vec<PostDto>, String> {
+    let posts_rows = sqlx::query(
+        "SELECT id, text, scheduled_at_utc, status, error_message, attachments_view_mode FROM posts 
+         WHERE target_id = ? 
+         ORDER BY id DESC"
+    )
+    .bind(target_id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let thumbs_dir = get_thumbs_dir(&app);
+    let mut result = Vec::new();
+
+    for r in posts_rows {
+        let post_id: i64 = r.get("id");
+        let att_rows = sqlx::query(
+            "SELECT id, file_name, size_bytes, local_path, vk_attachment_string 
+             FROM attachments WHERE post_id = ? ORDER BY order_index ASC"
+        )
+        .bind(post_id)
+        .fetch_all(&state.db)
+        .await
+        .unwrap_or_default();
+
+        let mut attachments = Vec::new();
+        for a in att_rows {
+            let att_id: i64 = a.get("id");
+            let local_path: Option<String> = a.get("local_path");
+
             let thumb_path = thumbs_dir.join(format!("{}.thumb", att_id));
             let thumb_data = if thumb_path.exists() {
                 std::fs::read_to_string(&thumb_path).ok()
@@ -783,7 +858,6 @@ async fn reschedule_post_custom(
     Ok(())
 }
 
-// Удаление поста только из локальной очереди
 #[tauri::command]
 async fn delete_local_post(post_id: i64, state: State<'_, AppState>) -> Result<(), String> {
     sqlx::query("UPDATE posts SET status = 'archived' WHERE id = ?")
@@ -794,7 +868,6 @@ async fn delete_local_post(post_id: i64, state: State<'_, AppState>) -> Result<(
     Ok(())
 }
 
-// Удаление поста из отложки ВКонтакте
 #[tauri::command]
 async fn delete_vk_post(post_id: i64, state: State<'_, AppState>) -> Result<(), String> {
     let post = sqlx::query("SELECT target_id, vk_post_id FROM posts WHERE id = ?")
@@ -834,6 +907,24 @@ async fn delete_vk_post(post_id: i64, state: State<'_, AppState>) -> Result<(), 
         .await
         .map_err(|e| e.to_string())?;
 
+    Ok(())
+}
+
+// Полное удаление записи из истории
+#[tauri::command]
+async fn delete_history_post(post_id: i64, state: State<'_, AppState>) -> Result<(), String> {
+    let mut tx = state.db.begin().await.map_err(|e| e.to_string())?;
+    sqlx::query("DELETE FROM attachments WHERE post_id = ?")
+        .bind(post_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?;
+    sqlx::query("DELETE FROM posts WHERE id = ?")
+        .bind(post_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?;
+    tx.commit().await.map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -949,7 +1040,6 @@ async fn add_post_to_queue(
         .map_err(|e| e.to_string())?
         .get::<i64, _>("id");
 
-        // Создаем и кэшируем постоянную миниатюру
         if let Ok(b64) = get_file_preview_base64(path_str.clone()).await {
             let thumb_path = thumbs_dir.join(format!("{}.thumb", att_id));
             let _ = std::fs::write(&thumb_path, b64);
@@ -1067,12 +1157,14 @@ pub fn run() {
             get_patterns,
             create_pattern,
             get_queue,
+            get_post_history,
             sync_vk_delayed_posts,
             get_next_slot_preview,
             reschedule_post_next_slot,
             reschedule_post_custom,
             delete_local_post,
             delete_vk_post,
+            delete_history_post,
             add_post_to_queue,
             start_transfer_pipeline
         ])

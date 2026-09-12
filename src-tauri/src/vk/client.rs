@@ -29,12 +29,6 @@ struct UploadServerResponse {
 }
 
 #[derive(Deserialize)]
-struct SavedPhotoItem {
-    id: i64,
-    owner_id: i64,
-}
-
-#[derive(Deserialize)]
 struct WallPostResponse {
     post_id: i64,
 }
@@ -332,14 +326,14 @@ impl VkClient {
             .to_string();
 
         let is_group = target_owner_id < 0;
-        let group_id_val = target_owner_id.abs().to_string();
+        let group_id_str = target_owner_id.abs().to_string();
 
         let mut server_params = vec![
             ("access_token", self.token.clone()),
             ("v", self.v.to_string()),
         ];
         if is_group {
-            server_params.push(("group_id", group_id_val.clone()));
+            server_params.push(("group_id", group_id_str.clone()));
         }
 
         let srv: UploadServerResponse = self
@@ -406,20 +400,37 @@ impl VkClient {
         ];
 
         if is_group {
-            save_params.push(("group_id", group_id_val));
+            save_params.push(("group_id", group_id_str));
         }
 
-        let saved: Vec<SavedPhotoItem> = self
+        let saved_raw: serde_json::Value = self
             .post_vk("photos.saveWallPhoto", save_params)
             .await
-            .context("Ошибка выполнения photos.saveWallPhoto")?;
+            .context("Ошибка при вызове photos.saveWallPhoto")?;
 
-        let photo_item = saved
-            .into_iter()
-            .next()
-            .ok_or_else(|| anyhow!("VK вернул пустой список сохраненных фото"))?;
+        let photo_list = if let Some(arr) = saved_raw.as_array() {
+            arr
+        } else if let Some(arr) = saved_raw.get("response").and_then(|r| r.as_array()) {
+            arr
+        } else {
+            return Err(anyhow!("Неожиданная структура ответа photos.saveWallPhoto: {:?}", saved_raw));
+        };
 
-        Ok(format!("photo{}_{}", photo_item.owner_id, photo_item.id))
+        let first = photo_list
+            .first()
+            .ok_or_else(|| anyhow!("VK вернул пустой список сохраненных фото: {:?}", saved_raw))?;
+
+        let pid = first
+            .get("id")
+            .and_then(|v| v.as_i64())
+            .ok_or_else(|| anyhow!("Нет id фото: {:?}", first))?;
+
+        let p_owner = first
+            .get("owner_id")
+            .and_then(|v| v.as_i64())
+            .ok_or_else(|| anyhow!("Нет owner_id фото: {:?}", first))?;
+
+        Ok(format!("photo{}_{}", p_owner, pid))
     }
 
     pub async fn schedule_wall_post(
@@ -439,6 +450,8 @@ impl VkClient {
         let attachments_str = attachments.join(",");
         let from_group_val = if from_group { "1" } else { "0" };
 
+        let mode = if attachments_view_mode == "carousel" { "carousel" } else { "grid" };
+
         let mut params = vec![
             ("access_token", self.token.clone()),
             ("v", self.v.to_string()),
@@ -455,8 +468,8 @@ impl VkClient {
 
         if !attachments_str.is_empty() {
             params.push(("attachments", attachments_str));
-            // Сетка или карусель (grid / carousel)
-            params.push(("attachments_view_mode", attachments_view_mode.to_string()));
+            // Официальный параметр API VK: primary_attachments_mode ('grid' | 'carousel')
+            params.push(("primary_attachments_mode", mode.to_string()));
         }
 
         let res: WallPostResponse = self.post_vk("wall.post", params).await?;
