@@ -24,7 +24,9 @@ import {
 	ChevronRight,
 	Maximize2,
 	RotateCcw,
-	LogIn,
+	ExternalLink,
+	ClipboardCheck,
+	GripVertical,
 } from "lucide-react";
 import {
 	format,
@@ -90,6 +92,17 @@ interface FilePreview {
 	previewUrl?: string;
 }
 
+function cleanTokenInput(raw: string): string {
+	let s = raw.trim();
+	if (s.includes("access_token=")) {
+		const after = s.substring(
+			s.indexOf("access_token=") + "access_token=".length,
+		);
+		s = after.split("&")[0].split("#")[0].trim();
+	}
+	return s.replace(/["';&]/g, "").trim();
+}
+
 export default function App() {
 	const [accounts, setAccounts] = useState<Account[]>([]);
 	const [activeAccountId, setActiveAccountId] = useState<number | null>(null);
@@ -113,6 +126,9 @@ export default function App() {
 	const [postText, setPostText] = useState("");
 	const [attachedFiles, setAttachedFiles] = useState<FilePreview[]>([]);
 	const [isDraggingOver, setIsDraggingOver] = useState(false);
+	const [draggedFileIndex, setDraggedFileIndex] = useState<number | null>(
+		null,
+	);
 
 	// Модалка полноразмерного просмотра изображения (Lightbox)
 	const [fullViewImage, setFullViewImage] = useState<string | null>(null);
@@ -155,6 +171,8 @@ export default function App() {
 	const [showTokenModal, setShowTokenModal] = useState(false);
 	const [newTokenInput, setNewTokenInput] = useState("");
 	const [isAddingToken, setIsAddingToken] = useState(false);
+	const [isAutoListeningClipboard, setIsAutoListeningClipboard] =
+		useState(false);
 
 	const [showPatternModal, setShowPatternModal] = useState(false);
 	const [newPatternName, setNewPatternName] = useState("");
@@ -276,28 +294,6 @@ export default function App() {
 			loadAccounts();
 			loadPatterns();
 		});
-
-		const unlistenAuth = listen<string>(
-			"vk-auth-success",
-			async (event) => {
-				const token = event.payload;
-				try {
-					const created = await invoke<Account>("add_token", {
-						token,
-					});
-					await loadAccounts();
-					setActiveAccountId(created.id);
-					await loadTargetsForAccount(created.id);
-					setShowTokenModal(false);
-				} catch (e) {
-					alert("Ошибка при сохранении токена: " + e);
-				}
-			},
-		);
-
-		return () => {
-			unlistenAuth.then((f) => f());
-		};
 	}, []);
 
 	useEffect(() => {
@@ -309,6 +305,37 @@ export default function App() {
 	useEffect(() => {
 		updateNextSlotPreview();
 	}, [selectedTargetId, selectedPatternId, queue]);
+
+	// Фоновый слушатель буфера обмена для автоматического обновления токена в 1 клик
+	useEffect(() => {
+		let timer: any = null;
+		if (isAutoListeningClipboard) {
+			timer = setInterval(async () => {
+				try {
+					const text = await navigator.clipboard.readText();
+					if (text && text.includes("access_token=")) {
+						const token = cleanTokenInput(text);
+						if (token.length > 20) {
+							setIsAutoListeningClipboard(false);
+							setIsAddingToken(true);
+							const created = await invoke<Account>("add_token", {
+								rawToken: token,
+							});
+							setNewTokenInput("");
+							setShowTokenModal(false);
+							await loadAccounts();
+							setActiveAccountId(created.id);
+							await loadTargetsForAccount(created.id);
+							alert("Токен успешно обновлен!");
+						}
+					}
+				} catch {}
+			}, 800);
+		}
+		return () => {
+			if (timer) clearInterval(timer);
+		};
+	}, [isAutoListeningClipboard]);
 
 	const appendFiles = async (paths: string[]) => {
 		const newItems: FilePreview[] = await Promise.all(
@@ -398,11 +425,22 @@ export default function App() {
 			document.removeEventListener("mousedown", handleClickOutside);
 	}, []);
 
-	const handleOpenVkLogin = async () => {
+	// Запуск браузера для авторизации
+	const handleOpenBrowserForLogin = async () => {
 		try {
-			await invoke("open_vk_auth_window");
+			await invoke("open_vk_auth_browser");
+			setIsAutoListeningClipboard(true);
 		} catch (e) {
-			alert("Не удалось открыть окно входа: " + e);
+			alert("Не удалось открыть браузер: " + e);
+		}
+	};
+
+	const handlePasteFromClipboard = async () => {
+		try {
+			const text = await navigator.clipboard.readText();
+			setNewTokenInput(cleanTokenInput(text));
+		} catch (e) {
+			alert("Не удалось прочитать буфер обмена: " + e);
 		}
 	};
 
@@ -417,14 +455,16 @@ export default function App() {
 	};
 
 	const handleAddToken = async () => {
-		if (!newTokenInput.trim()) return;
+		const token = cleanTokenInput(newTokenInput);
+		if (!token) return;
 		setIsAddingToken(true);
 		try {
 			const created = await invoke<Account>("add_token", {
-				token: newTokenInput.trim(),
+				rawToken: token,
 			});
 			setNewTokenInput("");
 			setShowTokenModal(false);
+			setIsAutoListeningClipboard(false);
 			await loadAccounts();
 			setActiveAccountId(created.id);
 			await loadTargetsForAccount(created.id);
@@ -438,7 +478,7 @@ export default function App() {
 	const handleDeleteAccount = async () => {
 		if (!activeAccountId) return;
 		const current = accounts.find((a) => a.id === activeAccountId);
-		if (!confirm(`Удалить подключение "${current?.name}"?`)) return;
+		if (!confirm(`Отключить аккаунт "${current?.name}"?`)) return;
 
 		try {
 			await invoke("delete_account", { accountId: activeAccountId });
@@ -467,6 +507,28 @@ export default function App() {
 			const paths = Array.isArray(res) ? res : [res];
 			appendFiles(paths);
 		}
+	};
+
+	// Drag & Drop сортировка прикрепленных файлов
+	const handleDragStartItem = (index: number) => {
+		setDraggedFileIndex(index);
+	};
+
+	const handleDragOverItem = (e: React.DragEvent, index: number) => {
+		e.preventDefault();
+		if (draggedFileIndex === null || draggedFileIndex === index) return;
+
+		setAttachedFiles((prev) => {
+			const updated = [...prev];
+			const [movedItem] = updated.splice(draggedFileIndex, 1);
+			updated.splice(index, 0, movedItem);
+			return updated;
+		});
+		setDraggedFileIndex(index);
+	};
+
+	const handleDragEndItem = () => {
+		setDraggedFileIndex(null);
 	};
 
 	const handleCreatePattern = async () => {
@@ -518,6 +580,7 @@ export default function App() {
 		}
 
 		try {
+			// Порядок filePaths в точности совпадает с визуальным порядком карточек
 			await invoke("add_post_to_queue", {
 				targetId: selectedTargetId,
 				patternId: selectedPatternId,
@@ -659,7 +722,7 @@ export default function App() {
 
 					<div className="flex items-center gap-2">
 						<span className="text-xs text-slate-400 font-medium">
-							Сообщество:
+							Аккаунт:
 						</span>
 						{accounts.length > 0 ? (
 							<div className="flex items-center gap-1.5">
@@ -679,10 +742,11 @@ export default function App() {
 									))}
 								</select>
 
+								{/* Быстрое обновление токена в 1 клик */}
 								<button
-									onClick={handleOpenVkLogin}
+									onClick={handleOpenBrowserForLogin}
 									className="p-1.5 rounded-lg text-slate-400 hover:text-blue-400 hover:bg-slate-800 transition-colors"
-									title="Обновить токен в один клик через VK"
+									title="Обновить токен в браузере"
 								>
 									<RefreshCw className="h-3.5 w-3.5" />
 								</button>
@@ -690,23 +754,34 @@ export default function App() {
 								<button
 									onClick={handleDeleteAccount}
 									className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-800 transition-colors"
-									title="Удалить это сообщество"
+									title="Отключить этот аккаунт"
 								>
 									<Trash2 className="h-3.5 w-3.5" />
 								</button>
 							</div>
 						) : (
+							<span className="text-xs text-amber-400/90 font-medium">
+								Нет подключений
+							</span>
+						)}
+
+						{/* Кнопка входа видна ТОЛЬКО если вход еще не совершен */}
+						{accounts.length === 0 && (
 							<button
-								onClick={handleOpenVkLogin}
-								className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3.5 py-1.5 text-xs font-semibold hover:bg-blue-500 transition-colors shadow-lg shadow-blue-600/20"
+								onClick={() => setShowTokenModal(true)}
+								className="flex items-center gap-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 px-3.5 py-1.5 text-xs font-semibold text-white transition-colors shadow-md shadow-blue-600/20"
 							>
-								<LogIn className="h-3.5 w-3.5" />
+								<ExternalLink className="h-3.5 w-3.5" />
 								<span>Войти через VK</span>
 							</button>
 						)}
 
+						{/* Кнопка добавления токена (аккуратный плюс) */}
 						<button
-							onClick={() => setShowTokenModal(true)}
+							onClick={() => {
+								setIsAutoListeningClipboard(false);
+								setShowTokenModal(true);
+							}}
 							className="flex items-center gap-1.5 rounded-lg bg-slate-800 text-slate-300 border border-slate-700 hover:border-slate-600 px-3 py-1.5 text-xs font-medium hover:bg-slate-750 transition-colors"
 						>
 							<Plus className="h-3.5 w-3.5 text-slate-400" />
@@ -791,7 +866,7 @@ export default function App() {
 						/>
 					</div>
 
-					{/* Зона загрузки медиа */}
+					{/* Зона загрузки медиа с сортировкой перетаскиванием */}
 					<div className="flex-1 flex flex-col min-h-[190px]">
 						{attachedFiles.length === 0 ? (
 							<div
@@ -817,7 +892,8 @@ export default function App() {
 								<div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-800 text-xs">
 									<span className="font-semibold text-slate-300">
 										Прикрепленные файлы (
-										{attachedFiles.length})
+										{attachedFiles.length}) • перетаскивайте
+										для изменения порядка
 									</span>
 									<button
 										onClick={handleSelectFiles}
@@ -832,22 +908,34 @@ export default function App() {
 									{attachedFiles.map((file, idx) => (
 										<div
 											key={idx}
+											draggable
+											onDragStart={() =>
+												handleDragStartItem(idx)
+											}
+											onDragOver={(e) =>
+												handleDragOverItem(e, idx)
+											}
+											onDragEnd={handleDragEndItem}
 											onClick={() =>
 												file.previewUrl &&
 												setFullViewImage(
 													file.previewUrl,
 												)
 											}
-											className="group relative h-28 rounded-xl bg-slate-950 border border-slate-800 overflow-hidden shadow-md flex items-center justify-center cursor-pointer"
+											className={`group relative h-28 rounded-xl bg-slate-950 border overflow-hidden shadow-md flex items-center justify-center cursor-grab active:cursor-grabbing transition-all ${
+												draggedFileIndex === idx
+													? "opacity-40 border-blue-500 scale-95"
+													: "border-slate-800 hover:border-slate-600"
+											}`}
 										>
 											{file.isImage && file.previewUrl ? (
 												<img
 													src={file.previewUrl}
 													alt={file.name}
-													className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-200"
+													className="h-full w-full object-cover pointer-events-none group-hover:scale-105 transition-transform duration-200"
 												/>
 											) : (
-												<div className="flex flex-col items-center p-2 text-center">
+												<div className="flex flex-col items-center p-2 text-center pointer-events-none">
 													<FileText className="h-7 w-7 text-blue-400 mb-1" />
 													<span className="text-[10px] text-slate-400 truncate max-w-[90px]">
 														{file.name}
@@ -855,8 +943,13 @@ export default function App() {
 												</div>
 											)}
 
-											<div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
-												<Maximize2 className="h-5 w-5 text-white drop-shadow" />
+											{/* Индикатор позиции */}
+											<span className="absolute bottom-1.5 left-1.5 px-1.5 py-0.5 rounded bg-black/70 text-[9px] font-mono text-slate-300 pointer-events-none backdrop-blur-sm">
+												#{idx + 1}
+											</span>
+
+											<div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
+												<GripVertical className="h-5 w-5 text-white/80 drop-shadow" />
 											</div>
 
 											<button
@@ -1628,7 +1721,7 @@ export default function App() {
 				</div>
 			)}
 
-			{/* Модальное окно добавления токена */}
+			{/* Модальное окно входа / добавления токена */}
 			{showTokenModal && (
 				<div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
 					<div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md p-6 shadow-2xl">
@@ -1640,7 +1733,10 @@ export default function App() {
 								</h3>
 							</div>
 							<button
-								onClick={() => setShowTokenModal(false)}
+								onClick={() => {
+									setIsAutoListeningClipboard(false);
+									setShowTokenModal(false);
+								}}
 								className="text-slate-400 hover:text-slate-200"
 							>
 								<X className="h-5 w-5" />
@@ -1648,34 +1744,55 @@ export default function App() {
 						</div>
 
 						<div className="space-y-4">
-							<button
-								onClick={handleOpenVkLogin}
-								className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold py-3 rounded-xl shadow-lg shadow-blue-600/25 transition-all text-xs"
-							>
-								<LogIn className="h-4 w-4" />
-								<span>Быстрый вход через ВКонтакте</span>
-							</button>
-
-							<div className="relative flex py-1 items-center">
-								<div className="flex-grow border-t border-slate-800"></div>
-								<span className="flex-shrink mx-3 text-[11px] text-slate-500">
-									или введите токен вручную
-								</span>
-								<div className="flex-grow border-t border-slate-800"></div>
+							<div className="p-3.5 bg-blue-600/10 border border-blue-500/30 rounded-xl text-xs text-blue-300 leading-relaxed">
+								Нажмите кнопку ниже, разрешите доступ в
+								браузере, затем скопируйте адресную строку
+								(Ctrl+C). Приложение автоматически распознает
+								ссылку или нажмите кнопку «Вставить».
 							</div>
+
+							<div className="flex gap-2">
+								<button
+									onClick={handleOpenBrowserForLogin}
+									className="flex-1 flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2.5 rounded-xl shadow-md transition-all text-xs"
+								>
+									<ExternalLink className="h-3.5 w-3.5" />
+									<span>Открыть окно входа в браузере</span>
+								</button>
+
+								<button
+									onClick={handlePasteFromClipboard}
+									className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-750 text-slate-200 border border-slate-700 px-3 py-2.5 rounded-xl text-xs font-medium transition-colors"
+									title="Вставить из буфера обмена"
+								>
+									<ClipboardCheck className="h-4 w-4 text-emerald-400" />
+									<span>Вставить</span>
+								</button>
+							</div>
+
+							{isAutoListeningClipboard && (
+								<div className="flex items-center gap-2 text-[11px] text-blue-400">
+									<RefreshCw className="h-3 w-3 animate-spin" />
+									<span>
+										Ожидание копирования адресной строки из
+										браузера...
+									</span>
+								</div>
+							)}
 
 							<div>
 								<label className="block text-[11px] font-medium text-slate-400 mb-1.5">
-									Ключ доступа (User Token или Community
-									Token)
+									Токен или ссылка из адресной строки:
 								</label>
 								<textarea
-									rows={3}
-									placeholder="Вставьте токен..."
+									rows={2}
+									placeholder="Вставьте ссылку или токен..."
 									className="w-full rounded-xl bg-slate-800 p-3 text-xs border border-slate-700 focus:outline-none focus:border-blue-500 font-mono resize-none leading-relaxed"
 									value={newTokenInput}
 									onChange={(e) =>
-										setNewTokenInput(e.target.value)
+										setNewTokenInput(
+											cleanTokenInput(e.target.value),
+										)
 									}
 								/>
 							</div>
@@ -1683,7 +1800,10 @@ export default function App() {
 
 						<div className="mt-6 flex justify-end gap-3">
 							<button
-								onClick={() => setShowTokenModal(false)}
+								onClick={() => {
+									setIsAutoListeningClipboard(false);
+									setShowTokenModal(false);
+								}}
 								className="px-4 py-2 text-xs font-medium text-slate-400 hover:text-slate-200"
 							>
 								Отмена
@@ -1693,9 +1813,11 @@ export default function App() {
 								disabled={
 									isAddingToken || !newTokenInput.trim()
 								}
-								className="px-5 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-100 rounded-xl text-xs font-semibold disabled:opacity-50 transition-colors"
+								className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold disabled:opacity-50 transition-colors shadow-md"
 							>
-								{isAddingToken ? "Проверка..." : "Сохранить"}
+								{isAddingToken
+									? "Проверка..."
+									: "Сохранить токен"}
 							</button>
 						</div>
 					</div>

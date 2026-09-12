@@ -182,7 +182,7 @@ impl VkClient {
             }
         }
 
-        let groups_payload: GroupsGetByIdPayload = self
+        let groups_payload: Result<GroupsGetByIdPayload> = self
             .get_vk(
                 "groups.getById",
                 vec![
@@ -191,24 +191,25 @@ impl VkClient {
                     ("fields", "photo_100"),
                 ],
             )
-            .await
-            .context("Не удалось подтвердить токен")?;
+            .await;
 
-        let group_list = match groups_payload {
-            GroupsGetByIdPayload::List(list) => list,
-            GroupsGetByIdPayload::Wrapped { groups } => groups,
-        };
-
-        let group = group_list
-            .into_iter()
-            .next()
-            .ok_or_else(|| anyhow!("Информация о сообществе не найдена"))?;
-
-        Ok(TokenOwner::Group {
-            id: group.id,
-            name: group.name,
-            photo_100: group.photo_100,
-        })
+        match groups_payload {
+            Ok(payload) => {
+                let group_list = match payload {
+                    GroupsGetByIdPayload::List(list) => list,
+                    GroupsGetByIdPayload::Wrapped { groups } => groups,
+                };
+                if let Some(group) = group_list.into_iter().next() {
+                    return Ok(TokenOwner::Group {
+                        id: group.id,
+                        name: group.name,
+                        photo_100: group.photo_100,
+                    });
+                }
+                Err(anyhow!("Информация об объекте токена не найдена"))
+            }
+            Err(e) => Err(anyhow!("Не удалось авторизовать токен: {}", e)),
+        }
     }
 
     pub async fn get_admin_groups(&self) -> Result<Vec<(i64, String, Option<String>)>> {
@@ -330,21 +331,33 @@ impl VkClient {
             .unwrap_or("photo.jpg")
             .to_string();
 
+        let is_group = target_owner_id < 0;
+        let group_id_val = target_owner_id.abs().to_string();
+
+        // 1. Получаем URL сервера загрузки
         let mut server_params = vec![
             ("access_token", self.token.clone()),
             ("v", self.v.to_string()),
         ];
-        if target_owner_id < 0 {
-            server_params.push(("group_id", target_owner_id.abs().to_string()));
+        if is_group {
+            server_params.push(("group_id", group_id_val.clone()));
         }
 
         let srv: UploadServerResponse = self
             .post_vk("photos.getWallUploadServer", server_params)
             .await?;
 
+        // 2. Загружаем файл на сервер ВКонтакте в multipart/form-data
+        let mime_type = match file_path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase().as_str() {
+            "png" => "image/png",
+            "webp" => "image/webp",
+            "gif" => "image/gif",
+            _ => "image/jpeg",
+        };
+
         let part = multipart::Part::bytes(file_bytes)
             .file_name(file_name)
-            .mime_str("image/jpeg")?;
+            .mime_str(mime_type)?;
 
         let form = multipart::Form::new().part("photo", part);
 
@@ -367,7 +380,7 @@ impl VkClient {
                     v.as_str().map(|s| s.to_string())
                 }
             })
-            .ok_or_else(|| anyhow!("Ответ загрузчика не содержит server"))?;
+            .ok_or_else(|| anyhow!("Ответ загрузчика не содержит server: {:?}", upload_raw))?;
 
         let photo = upload_raw
             .get("photo")
@@ -378,14 +391,15 @@ impl VkClient {
                     Some(v.to_string())
                 }
             })
-            .ok_or_else(|| anyhow!("Ответ загрузчика не содержит photo"))?;
+            .ok_or_else(|| anyhow!("Ответ загрузчика не содержит photo: {:?}", upload_raw))?;
 
         let hash = upload_raw
             .get("hash")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| anyhow!("Ответ загрузчика не содержит hash"))?
+            .ok_or_else(|| anyhow!("Ответ загрузчика не содержит hash: {:?}", upload_raw))?
             .to_string();
 
+        // 3. Сохраняем фото на стене
         let mut save_params = vec![
             ("access_token", self.token.clone()),
             ("v", self.v.to_string()),
@@ -393,18 +407,20 @@ impl VkClient {
             ("photo", photo),
             ("hash", hash),
         ];
-        if target_owner_id < 0 {
-            save_params.push(("group_id", target_owner_id.abs().to_string()));
+
+        if is_group {
+            save_params.push(("group_id", group_id_val));
         }
 
         let saved: Vec<SavedPhotoItem> = self
             .post_vk("photos.saveWallPhoto", save_params)
-            .await?;
+            .await
+            .context("Ошибка выполнения photos.saveWallPhoto")?;
 
         let photo_item = saved
             .into_iter()
             .next()
-            .ok_or_else(|| anyhow!("Ошибка сохранения фото"))?;
+            .ok_or_else(|| anyhow!("VK вернул пустой список сохраненных фото"))?;
 
         Ok(format!("photo{}_{}", photo_item.owner_id, photo_item.id))
     }
