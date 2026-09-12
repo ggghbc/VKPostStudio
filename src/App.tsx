@@ -32,6 +32,9 @@ import {
 	ArrowLeft,
 	ArrowRight,
 	History,
+	PanelRightClose,
+	PanelRightOpen,
+	Undo2,
 } from "lucide-react";
 import {
 	format,
@@ -133,6 +136,9 @@ export default function App() {
 	const [isSyncingVk, setIsSyncingVk] = useState(false);
 	const [isGroupTokenAuth, setIsGroupTokenAuth] = useState(false);
 
+	// Сворачивание правой панели
+	const [isRightPanelOpen, setIsRightPanelOpen] = useState(true);
+
 	// Текст и медиа
 	const [postText, setPostText] = useState("");
 	const [attachedFiles, setAttachedFiles] = useState<FilePreview[]>([]);
@@ -165,6 +171,11 @@ export default function App() {
 	const [rescheduleMinutes, setRescheduleMinutes] = useState<number>(0);
 	const [rescheduleViewMonth, setRescheduleViewMonth] = useState<Date>(
 		new Date(),
+	);
+
+	// Модальное окно возвращения поста из ВК в локальную очередь
+	const [revertModalPost, setRevertModalPost] = useState<PostItem | null>(
+		null,
 	);
 
 	// Настройки публикации
@@ -635,6 +646,41 @@ export default function App() {
 		}
 	};
 
+	// Возврат поста из ВК в локальную очередь на то же время
+	const handleRevertSameTime = async (postId: number) => {
+		try {
+			await invoke("revert_vk_post_to_local_same_time", { postId });
+			setRevertModalPost(null);
+			if (selectedTargetId) {
+				syncVkQueue(selectedTargetId);
+			}
+			setActiveQueueTab("local");
+		} catch (e) {
+			alert("Ошибка возврата поста: " + e);
+		}
+	};
+
+	// Возврат поста из ВК в локальную очередь на следующий слот по паттерну
+	const handleRevertNextSlot = async (postId: number) => {
+		if (!selectedPatternId) {
+			alert("Выберите паттерн");
+			return;
+		}
+		try {
+			await invoke("revert_vk_post_to_local_next_slot", {
+				postId,
+				patternId: selectedPatternId,
+			});
+			setRevertModalPost(null);
+			if (selectedTargetId) {
+				syncVkQueue(selectedTargetId);
+			}
+			setActiveQueueTab("local");
+		} catch (e) {
+			alert("Ошибка возврата поста: " + e);
+		}
+	};
+
 	const handleRescheduleNextSlot = async (postId: number) => {
 		if (!selectedPatternId) {
 			alert("Выберите паттерн");
@@ -825,34 +871,65 @@ export default function App() {
 					</div>
 				</div>
 
-				{targets.length > 1 && (
-					<div className="flex items-center gap-2 bg-slate-800/80 rounded-lg px-2.5 py-1 border border-slate-700/60">
-						<span className="text-xs text-slate-400">Цель:</span>
-						<select
-							className="bg-transparent text-xs font-medium text-slate-200 focus:outline-none cursor-pointer"
-							value={selectedTargetId || ""}
-							onChange={(e) =>
-								setSelectedTargetId(Number(e.target.value))
-							}
-						>
-							{targets.map((t) => (
-								<option
-									key={t.id}
-									value={t.id}
-									className="bg-slate-900 text-slate-100"
-								>
-									{t.title}
-								</option>
-							))}
-						</select>
-					</div>
-				)}
+				<div className="flex items-center gap-3">
+					{targets.length > 1 && (
+						<div className="flex items-center gap-2 bg-slate-800/80 rounded-lg px-2.5 py-1 border border-slate-700/60">
+							<span className="text-xs text-slate-400">
+								Цель:
+							</span>
+							<select
+								className="bg-transparent text-xs font-medium text-slate-200 focus:outline-none cursor-pointer"
+								value={selectedTargetId || ""}
+								onChange={(e) =>
+									setSelectedTargetId(Number(e.target.value))
+								}
+							>
+								{targets.map((t) => (
+									<option
+										key={t.id}
+										value={t.id}
+										className="bg-slate-900 text-slate-100"
+									>
+										{t.title}
+									</option>
+								))}
+							</select>
+						</div>
+					)}
+
+					{/* Кнопка сворачивания/разворачивания правого блока */}
+					<button
+						onClick={() => setIsRightPanelOpen(!isRightPanelOpen)}
+						className={`p-1.5 rounded-lg border transition-colors ${
+							isRightPanelOpen
+								? "bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-750"
+								: "bg-blue-600/20 border-blue-500/40 text-blue-400 hover:bg-blue-600/30"
+						}`}
+						title={
+							isRightPanelOpen
+								? "Свернуть панель очереди"
+								: "Развернуть панель очереди"
+						}
+					>
+						{isRightPanelOpen ? (
+							<PanelRightClose className="h-4 w-4" />
+						) : (
+							<PanelRightOpen className="h-4 w-4" />
+						)}
+					</button>
+				</div>
 			</header>
 
 			{/* Основное пространство */}
-			<main className="flex flex-1 overflow-hidden">
+			<main className="flex flex-1 overflow-hidden relative">
 				{/* Левая панель: Создание записи */}
-				<section className="flex flex-col w-1/2 border-r border-slate-800 p-6 overflow-y-auto">
+				<section
+					className={`flex flex-col border-r border-slate-800 p-6 overflow-y-auto transition-all duration-300 ease-in-out ${
+						isRightPanelOpen
+							? "w-1/2"
+							: "w-full max-w-4xl mx-auto border-r-0"
+					}`}
+				>
 					<div className="mb-3 flex items-center justify-between">
 						<h2 className="text-sm font-semibold tracking-wide text-slate-300">
 							СОЗДАНИЕ ЗАПИСИ
@@ -939,7 +1016,9 @@ export default function App() {
 									</button>
 								</div>
 
-								<div className="flex-1 overflow-y-auto grid grid-cols-3 gap-3 pr-1 select-none">
+								<div
+									className={`flex-1 overflow-y-auto grid gap-3 pr-1 select-none ${isRightPanelOpen ? "grid-cols-3" : "grid-cols-4"}`}
+								>
 									{attachedFiles.map((file, idx) => (
 										<div
 											key={idx}
@@ -974,10 +1053,12 @@ export default function App() {
 												</div>
 											)}
 
+											{/* Индикатор позиции */}
 											<span className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-black/70 text-[10px] font-mono text-slate-300 font-bold backdrop-blur-sm">
 												#{idx + 1}
 											</span>
 
+											{/* Панель управления порядком внизу карточки */}
 											<div className="absolute inset-x-0 bottom-0 py-1 bg-slate-950/85 backdrop-blur-sm flex items-center justify-between px-1.5 border-t border-slate-800/80">
 												<button
 													disabled={idx === 0}
@@ -1391,8 +1472,14 @@ export default function App() {
 					</div>
 				</section>
 
-				{/* Правая панель: 3 раздельные вкладки очередей */}
-				<section className="flex flex-col w-1/2 p-6 overflow-hidden bg-slate-950/40">
+				{/* Правая панель: 3 вкладки очередей с плавной анимацией скрытия */}
+				<section
+					className={`flex flex-col p-6 overflow-hidden bg-slate-950/40 transition-all duration-300 ease-in-out ${
+						isRightPanelOpen
+							? "w-1/2 opacity-100 translate-x-0"
+							: "w-0 p-0 opacity-0 translate-x-12 pointer-events-none"
+					}`}
+				>
 					<div className="mb-4 flex items-center justify-between">
 						<div className="flex items-center bg-slate-900 border border-slate-800 rounded-xl p-1 gap-1">
 							<button
@@ -1436,9 +1523,7 @@ export default function App() {
 								}`}
 							>
 								<History className="h-3.5 w-3.5" />
-								<span>
-									История постов ({historyPosts.length})
-								</span>
+								<span>История ({historyPosts.length})</span>
 							</button>
 						</div>
 
@@ -1481,7 +1566,7 @@ export default function App() {
 									) : (
 										<>
 											<Send className="h-4 w-4" />
-											<span>Отправить в очередь ВК</span>
+											<span>Отправить в ВК</span>
 										</>
 									)}
 								</button>
@@ -1662,6 +1747,32 @@ export default function App() {
 													</div>
 												)}
 
+												{/* Кнопка возврата поста из отложки ВК в локальную очередь */}
+												{isVkPost && (
+													<div className="flex items-center gap-2 mb-3 p-2.5 rounded-xl bg-slate-900 border border-slate-800">
+														<span className="text-xs text-slate-400 font-medium">
+															Действие:
+														</span>
+														<button
+															onClick={(e) => {
+																e.stopPropagation();
+																setRevertModalPost(
+																	post,
+																);
+															}}
+															className="px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 text-xs font-semibold flex items-center gap-1.5 transition-colors"
+															title="Отозвать пост из ВК обратно в локальную очередь для редактирования"
+														>
+															<Undo2 className="h-3.5 w-3.5" />
+															<span>
+																Вернуть в
+																локальную
+																очередь
+															</span>
+														</button>
+													</div>
+												)}
+
 												{activeQueueTab === "local" && (
 													<div className="flex items-center gap-2 mb-3 p-2.5 rounded-xl bg-slate-900 border border-slate-800">
 														<span className="text-xs text-slate-400 font-medium">
@@ -1768,6 +1879,74 @@ export default function App() {
 					</div>
 				</section>
 			</main>
+
+			{/* Модальное окно возврата поста из ВК в локальную очередь */}
+			{revertModalPost && (
+				<div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-150">
+					<div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md p-6 shadow-2xl">
+						<div className="flex items-center justify-between mb-4">
+							<div className="flex items-center gap-2 text-amber-400">
+								<Undo2 className="h-5 w-5" />
+								<h3 className="font-semibold text-sm text-slate-100">
+									Вернуть пост в локальную очередь
+								</h3>
+							</div>
+							<button
+								onClick={() => setRevertModalPost(null)}
+								className="text-slate-400 hover:text-slate-200"
+							>
+								<X className="h-5 w-5" />
+							</button>
+						</div>
+
+						<p className="text-xs text-slate-300 mb-5 leading-relaxed">
+							Пост будет удален из отложки ВКонтакте и вернется в
+							список локальной очереди для редактирования и
+							повторной отправки. Выберите время публикации:
+						</p>
+
+						<div className="space-y-2.5">
+							<button
+								onClick={() =>
+									handleRevertSameTime(revertModalPost.id)
+								}
+								className="w-full flex items-center justify-between p-3 rounded-xl bg-slate-800 hover:bg-slate-750 border border-slate-700 text-xs font-semibold text-slate-100 transition-colors text-left"
+							>
+								<span>Вернуть на то же время</span>
+								<span className="font-mono text-[11px] text-blue-400">
+									{format(
+										new Date(
+											revertModalPost.scheduled_at_utc,
+										),
+										"dd/MM/yyyy HH:mm",
+									)}
+								</span>
+							</button>
+
+							<button
+								onClick={() =>
+									handleRevertNextSlot(revertModalPost.id)
+								}
+								className="w-full flex items-center justify-between p-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-xs font-semibold text-white transition-colors shadow-md shadow-blue-600/20 text-left"
+							>
+								<span>Добавить в очередь (по паттерну)</span>
+								<span className="text-[11px] opacity-80">
+									в конец очереди
+								</span>
+							</button>
+						</div>
+
+						<div className="mt-5 flex justify-end">
+							<button
+								onClick={() => setRevertModalPost(null)}
+								className="px-4 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-slate-200"
+							>
+								Отмена
+							</button>
+						</div>
+					</div>
+				</div>
+			)}
 
 			{/* Модальное окно изменения времени поста в очереди */}
 			{rescheduleModalPost && (

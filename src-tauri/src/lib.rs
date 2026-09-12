@@ -524,7 +524,6 @@ async fn get_queue(
     Ok(result)
 }
 
-// Получение полной истории всех постов цели (включая архивированные/завершенные)
 #[tauri::command]
 async fn get_post_history(
     target_id: i64,
@@ -858,6 +857,98 @@ async fn reschedule_post_custom(
     Ok(())
 }
 
+// 1. Вернуть пост из ВК в локальную очередь на ТО ЖЕ время
+#[tauri::command]
+async fn revert_vk_post_to_local_same_time(post_id: i64, state: State<'_, AppState>) -> Result<(), String> {
+    let post = sqlx::query("SELECT target_id, vk_post_id FROM posts WHERE id = ?")
+        .bind(post_id)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if let Some(p) = post {
+        let target_id: i64 = p.get("target_id");
+        let vk_post_id: Option<i64> = p.get("vk_post_id");
+
+        if let Some(vk_id) = vk_post_id {
+            if let Ok(t_row) = sqlx::query("SELECT account_id, owner_id FROM targets WHERE id = ?")
+                .bind(target_id)
+                .fetch_one(&state.db)
+                .await
+            {
+                let account_id: i64 = t_row.get("account_id");
+                let owner_id: i64 = t_row.get("owner_id");
+                if let Ok(acc) = sqlx::query("SELECT token FROM accounts WHERE id = ?")
+                    .bind(account_id)
+                    .fetch_one(&state.db)
+                    .await
+                {
+                    let token: String = acc.get("token");
+                    let vk = VkClient::new(token);
+                    let _ = vk.delete_wall_post(owner_id, vk_id).await;
+                }
+            }
+        }
+    }
+
+    sqlx::query("UPDATE posts SET status = 'queued', vk_post_id = NULL, error_message = NULL WHERE id = ?")
+        .bind(post_id)
+        .execute(&state.db)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+// 2. Вернуть пост из ВК в локальную очередь на СЛЕДУЮЩИЙ слот по паттерну
+#[tauri::command]
+async fn revert_vk_post_to_local_next_slot(
+    post_id: i64,
+    pattern_id: i64,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let post = sqlx::query("SELECT target_id, vk_post_id FROM posts WHERE id = ?")
+        .bind(post_id)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if let Some(ref p) = post {
+        let target_id: i64 = p.get("target_id");
+        let vk_post_id: Option<i64> = p.get("vk_post_id");
+
+        if let Some(vk_id) = vk_post_id {
+            if let Ok(t_row) = sqlx::query("SELECT account_id, owner_id FROM targets WHERE id = ?")
+                .bind(target_id)
+                .fetch_one(&state.db)
+                .await
+            {
+                let account_id: i64 = t_row.get("account_id");
+                let owner_id: i64 = t_row.get("owner_id");
+                if let Ok(acc) = sqlx::query("SELECT token FROM accounts WHERE id = ?")
+                    .bind(account_id)
+                    .fetch_one(&state.db)
+                    .await
+                {
+                    let token: String = acc.get("token");
+                    let vk = VkClient::new(token);
+                    let _ = vk.delete_wall_post(owner_id, vk_id).await;
+                }
+            }
+        }
+    }
+
+    let slot = reschedule_post_next_slot(post_id, pattern_id, state.clone()).await?;
+
+    sqlx::query("UPDATE posts SET vk_post_id = NULL, error_message = NULL WHERE id = ?")
+        .bind(post_id)
+        .execute(&state.db)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(slot)
+}
+
 #[tauri::command]
 async fn delete_local_post(post_id: i64, state: State<'_, AppState>) -> Result<(), String> {
     sqlx::query("UPDATE posts SET status = 'archived' WHERE id = ?")
@@ -910,7 +1001,6 @@ async fn delete_vk_post(post_id: i64, state: State<'_, AppState>) -> Result<(), 
     Ok(())
 }
 
-// Полное удаление записи из истории
 #[tauri::command]
 async fn delete_history_post(post_id: i64, state: State<'_, AppState>) -> Result<(), String> {
     let mut tx = state.db.begin().await.map_err(|e| e.to_string())?;
@@ -1162,6 +1252,8 @@ pub fn run() {
             get_next_slot_preview,
             reschedule_post_next_slot,
             reschedule_post_custom,
+            revert_vk_post_to_local_same_time,
+            revert_vk_post_to_local_next_slot,
             delete_local_post,
             delete_vk_post,
             delete_history_post,
