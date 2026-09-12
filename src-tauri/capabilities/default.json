@@ -1,0 +1,7 @@
+{
+	"$schema": "../gen/schemas/desktop-schema.json",
+	"identifier": "default",
+	"description": "Базовые разрешения для работы с диалогами и файловой системой",
+	"windows": ["main"],
+	"permissions": ["core:default", "dialog:default", "fs:default"]
+}
