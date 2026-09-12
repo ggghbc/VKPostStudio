@@ -15,11 +15,28 @@ impl TransferWorker {
         vk: VkClient,
         target_id: i64,
     ) -> Result<()> {
+        let result = Self::process_posts(&app, &db, &vk, target_id).await;
+
+        // Гарантированно уведомляем UI о завершении переноса при любом исходе
+        let _ = app.emit("transfer-finished", serde_json::json!({
+            "success": result.is_ok(),
+            "error": result.as_ref().err().map(|e| e.to_string())
+        }));
+
+        result
+    }
+
+    async fn process_posts(
+        app: &AppHandle,
+        db: &SqlitePool,
+        vk: &VkClient,
+        target_id: i64,
+    ) -> Result<()> {
         let target_row = sqlx::query(
             "SELECT owner_id, target_type FROM targets WHERE id = ?"
         )
         .bind(target_id)
-        .fetch_one(&db)
+        .fetch_one(db)
         .await?;
 
         let owner_id: i64 = target_row.get("owner_id");
@@ -27,13 +44,13 @@ impl TransferWorker {
         let from_group = target_type == "community";
 
         let posts = sqlx::query(
-            "SELECT id, text, scheduled_at_utc, guid, author_name 
+            "SELECT id, text, scheduled_at_utc, guid, signed, close_comments, mute_notifications, mark_as_ads 
              FROM posts 
              WHERE target_id = ? AND status = 'queued' 
              ORDER BY scheduled_at_utc ASC"
         )
         .bind(target_id)
-        .fetch_all(&db)
+        .fetch_all(db)
         .await?;
 
         let total = posts.len();
@@ -43,10 +60,13 @@ impl TransferWorker {
 
         for (idx, post) in posts.iter().enumerate() {
             let post_id: i64 = post.get("id");
-            let raw_text: String = post.get("text");
+            let text: String = post.get("text");
             let sched_utc_str: String = post.get("scheduled_at_utc");
             let guid: String = post.get("guid");
-            let author_name: Option<String> = post.get("author_name");
+            let signed: bool = post.get::<i64, _>("signed") == 1;
+            let close_comments: bool = post.get::<i64, _>("close_comments") == 1;
+            let mute_notifications: bool = post.get::<i64, _>("mute_notifications") == 1;
+            let mark_as_ads: bool = post.get::<i64, _>("mark_as_ads") == 1;
 
             let scheduled_at = DateTime::parse_from_rfc3339(&sched_utc_str)
                 .map(|dt| dt.with_timezone(&Utc))
@@ -55,9 +75,9 @@ impl TransferWorker {
             let now = Utc::now();
             if scheduled_at <= now {
                 sqlx::query("UPDATE posts SET status = 'failed', error_message = ? WHERE id = ?")
-                    .bind("Время слота уже в прошлом. Пересчитайте очередь.")
+                    .bind("Время слота уже в прошлом. Задайте новое время.")
                     .bind(post_id)
-                    .execute(&db)
+                    .execute(db)
                     .await?;
                 continue;
             }
@@ -66,7 +86,6 @@ impl TransferWorker {
                 "current": idx + 1,
                 "total": total,
                 "post_id": post_id,
-                "status": "uploading"
             }));
 
             let attachments = sqlx::query(
@@ -75,10 +94,11 @@ impl TransferWorker {
                  WHERE post_id = ? ORDER BY order_index ASC"
             )
             .bind(post_id)
-            .fetch_all(&db)
+            .fetch_all(db)
             .await?;
 
             let mut vk_attachment_strings = Vec::new();
+            let mut upload_failed = false;
 
             for att in attachments {
                 let att_id: i64 = att.get("id");
@@ -94,13 +114,14 @@ impl TransferWorker {
                 if let Some(path_str) = local_path_str {
                     let path = PathBuf::from(&path_str);
                     if !path.exists() {
-                        let err_msg = format!("Файл отсутствует на диске: {}", path_str);
+                        let err_msg = format!("Файл не найден на диске: {}", path_str);
                         sqlx::query("UPDATE posts SET status = 'failed', error_message = ? WHERE id = ?")
                             .bind(&err_msg)
                             .bind(post_id)
-                            .execute(&db)
+                            .execute(db)
                             .await?;
-                        continue;
+                        upload_failed = true;
+                        break;
                     }
 
                     match vk.upload_wall_photo(owner_id, &path).await {
@@ -114,37 +135,53 @@ impl TransferWorker {
                             )
                             .bind(&vk_string)
                             .bind(att_id)
-                            .execute(&db)
+                            .execute(db)
                             .await?;
 
                             vk_attachment_strings.push(vk_string);
                         }
                         Err(e) => {
-                            let err_msg = format!("Ошибка загрузки вложения: {}", e);
+                            let e_str = e.to_string();
+                            let err_msg = if e_str.contains("error 27") || e_str.contains("unavailable with group auth") {
+                                "VK API запрещает загружать фото через токен сообщества (код 27). Требуется токен пользователя-администратора (User Token).".to_string()
+                            } else {
+                                format!("Ошибка загрузки: {}", e_str)
+                            };
+
                             sqlx::query("UPDATE attachments SET upload_status = 'error', error_message = ? WHERE id = ?")
                                 .bind(&err_msg)
                                 .bind(att_id)
-                                .execute(&db)
+                                .execute(db)
                                 .await?;
-                            return Err(anyhow!(err_msg));
+
+                            sqlx::query("UPDATE posts SET status = 'failed', error_message = ? WHERE id = ?")
+                                .bind(&err_msg)
+                                .bind(post_id)
+                                .execute(db)
+                                .await?;
+
+                            upload_failed = true;
+                            break;
                         }
                     }
                 }
             }
 
-            let final_message = match author_name {
-                Some(name) if !name.trim().is_empty() => format!("{}\n\n— {}", raw_text, name.trim()),
-                _ => raw_text,
-            };
+            if upload_failed {
+                continue;
+            }
 
             let vk_result = vk
                 .schedule_wall_post(
                     owner_id,
-                    &final_message,
+                    &text,
                     &vk_attachment_strings,
                     scheduled_at.timestamp(),
                     from_group,
-                    false,
+                    signed,
+                    close_comments,
+                    mute_notifications,
+                    mark_as_ads,
                     &guid,
                 )
                 .await;
@@ -156,25 +193,24 @@ impl TransferWorker {
                     )
                     .bind(vk_post_id)
                     .bind(post_id)
-                    .execute(&db)
+                    .execute(db)
                     .await?;
                 }
                 Err(e) => {
                     sqlx::query("UPDATE posts SET status = 'failed', error_message = ? WHERE id = ?")
                         .bind(e.to_string())
                         .bind(post_id)
-                        .execute(&db)
+                        .execute(db)
                         .await?;
                 }
             }
 
             if idx + 1 < total {
-                let jitter = (rand::random::<u64>() % 8) + 5;
+                let jitter = (rand::random::<u64>() % 6) + 4;
                 tokio::time::sleep(Duration::from_secs(jitter)).await;
             }
         }
 
-        let _ = app.emit("transfer-finished", serde_json::json!({ "success": true }));
         Ok(())
     }
 }
