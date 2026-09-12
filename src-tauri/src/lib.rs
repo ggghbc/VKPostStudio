@@ -7,7 +7,9 @@ use services::pattern_engine::{PatternConfig, PatternEngine};
 use services::transfer_worker::TransferWorker;
 use sqlx::{sqlite::SqlitePoolOptions, Row, SqlitePool};
 use std::sync::Arc;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 use vk::client::{TokenOwner, VkClient};
 
@@ -88,6 +90,76 @@ fn encode_base64(bytes: &[u8]) -> String {
         }
     }
     res
+}
+
+#[tauri::command]
+async fn open_vk_auth_window(app: AppHandle) -> Result<(), String> {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .map_err(|e| e.to_string())?;
+    let port = listener.local_addr().map_err(|e| e.to_string())?.port();
+
+    let redirect_uri = format!("http://127.0.0.1:{}/blank.html", port);
+    let auth_url = format!(
+        "https://oauth.vk.ru/authorize?client_id=6287487&scope=wall,photos,docs,groups,offline&response_type=token&redirect_uri={}&display=page",
+        urlencoding::encode(&redirect_uri)
+    );
+
+    // Запуск системного браузера
+    let _ = open::that(&auth_url);
+
+    let app_handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Ok((mut socket, _)) = listener.accept().await {
+            let mut buf = [0; 4096];
+            if let Ok(n) = socket.read(&mut buf).await {
+                let request = String::from_utf8_lossy(&buf[..n]);
+                
+                // Если браузер передал фрагмент с токеном через query-параметр или заголовок (редко, но бывает)
+                let mut token = String::new();
+                if let Some(idx) = request.find("access_token=") {
+                    let after = &request[idx + "access_token=".len()..];
+                    token = after.split('&').next().unwrap_or("").split(' ').next().unwrap_or("").to_string();
+                }
+
+                // Так как токен передается в хэш-урле (#access_token=...), современные браузеры 
+                // отправляют его через JS редирект или мы принимаем POST/GET от скрипта.
+                // Передадим клиенту маленькую HTML-страничку, которая вытащит токен из location.hash и отправит локально.
+                let html = if token.is_empty() {
+                    r#"<html><body><script>
+                        if(window.location.hash) {
+                            fetch('/token?t=' + encodeURIComponent(window.location.hash.substring(1)));
+                        }
+                    </script><h3>Авторизация... Закройте это окно.</h3></body></html>"#
+                } else {
+                    "<html><body><h3>Успешно! Возвратитесь в приложение.</h3><script>window.close();</script></body></html>"
+                };
+
+                if request.contains("GET /token?") {
+                    if let Some(t_idx) = request.find("t=") {
+                        let t_part = &request[t_idx + 2..];
+                        let hash_str = t_part.split(' ').next().unwrap_or("");
+                        if let Some(at_idx) = hash_str.find("access_token=") {
+                            let after = &hash_str[at_idx + "access_token=".len()..];
+                            let extracted = after.split('&').next().unwrap_or("").to_string();
+                            if !extracted.is_empty() {
+                                let _ = app_handle.emit("vk-auth-success", extracted);
+                            }
+                        }
+                    }
+                }
+
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\n\r\n{}",
+                    html.len(),
+                    html
+                );
+                let _ = socket.write_all(response.as_bytes()).await;
+            }
+        }
+    });
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -940,6 +1012,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            open_vk_auth_window,
             get_file_preview_base64,
             init_client_timezone,
             get_accounts,

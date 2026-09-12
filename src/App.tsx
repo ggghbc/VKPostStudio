@@ -24,6 +24,7 @@ import {
 	ChevronRight,
 	Maximize2,
 	RotateCcw,
+	LogIn,
 } from "lucide-react";
 import {
 	format,
@@ -275,6 +276,28 @@ export default function App() {
 			loadAccounts();
 			loadPatterns();
 		});
+
+		const unlistenAuth = listen<string>(
+			"vk-auth-success",
+			async (event) => {
+				const token = event.payload;
+				try {
+					const created = await invoke<Account>("add_token", {
+						token,
+					});
+					await loadAccounts();
+					setActiveAccountId(created.id);
+					await loadTargetsForAccount(created.id);
+					setShowTokenModal(false);
+				} catch (e) {
+					alert("Ошибка при сохранении токена: " + e);
+				}
+			},
+		);
+
+		return () => {
+			unlistenAuth.then((f) => f());
+		};
 	}, []);
 
 	useEffect(() => {
@@ -374,6 +397,14 @@ export default function App() {
 		return () =>
 			document.removeEventListener("mousedown", handleClickOutside);
 	}, []);
+
+	const handleOpenVkLogin = async () => {
+		try {
+			await invoke("open_vk_auth_window");
+		} catch (e) {
+			alert("Не удалось открыть окно входа: " + e);
+		}
+	};
 
 	const handleSwitchAccount = async (accId: number) => {
 		try {
@@ -588,7 +619,6 @@ export default function App() {
 		);
 	};
 
-	// Календарная сетка создания поста
 	const monthStart = startOfMonth(viewMonth);
 	const monthEnd = endOfMonth(viewMonth);
 	const calendarStart = startOfWeek(monthStart, { weekStartsOn: 1 });
@@ -604,7 +634,6 @@ export default function App() {
 		return format(d, "dd/MM/yyyy HH:mm");
 	};
 
-	// Календарная сетка модалки изменения времени поста
 	const resMonthStart = startOfMonth(rescheduleViewMonth);
 	const resMonthEnd = endOfMonth(rescheduleViewMonth);
 	const resCalendarStart = startOfWeek(resMonthStart, { weekStartsOn: 1 });
@@ -635,7 +664,7 @@ export default function App() {
 						{accounts.length > 0 ? (
 							<div className="flex items-center gap-1.5">
 								<select
-									className="rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-semibold text-slate-100 border border-slate-700 focus:outline-none focus:border-blue-500 cursor-pointer max-w-[260px] truncate"
+									className="rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-semibold text-slate-100 border border-slate-700 focus:outline-none focus:border-blue-500 cursor-pointer max-w-[240px] truncate"
 									value={activeAccountId || ""}
 									onChange={(e) =>
 										handleSwitchAccount(
@@ -651,6 +680,14 @@ export default function App() {
 								</select>
 
 								<button
+									onClick={handleOpenVkLogin}
+									className="p-1.5 rounded-lg text-slate-400 hover:text-blue-400 hover:bg-slate-800 transition-colors"
+									title="Обновить токен в один клик через VK"
+								>
+									<RefreshCw className="h-3.5 w-3.5" />
+								</button>
+
+								<button
 									onClick={handleDeleteAccount}
 									className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-800 transition-colors"
 									title="Удалить это сообщество"
@@ -659,16 +696,20 @@ export default function App() {
 								</button>
 							</div>
 						) : (
-							<span className="text-xs text-amber-400/90 font-medium">
-								Нет подключений
-							</span>
+							<button
+								onClick={handleOpenVkLogin}
+								className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3.5 py-1.5 text-xs font-semibold hover:bg-blue-500 transition-colors shadow-lg shadow-blue-600/20"
+							>
+								<LogIn className="h-3.5 w-3.5" />
+								<span>Войти через VK</span>
+							</button>
 						)}
 
 						<button
 							onClick={() => setShowTokenModal(true)}
-							className="flex items-center gap-1.5 rounded-lg bg-blue-600/20 text-blue-400 border border-blue-500/30 px-3 py-1.5 text-xs font-semibold hover:bg-blue-600/30 transition-colors"
+							className="flex items-center gap-1.5 rounded-lg bg-slate-800 text-slate-300 border border-slate-700 hover:border-slate-600 px-3 py-1.5 text-xs font-medium hover:bg-slate-750 transition-colors"
 						>
-							<Plus className="h-3.5 w-3.5" />
+							<Plus className="h-3.5 w-3.5 text-slate-400" />
 							<span>Добавить токен</span>
 						</button>
 					</div>
@@ -950,7 +991,7 @@ export default function App() {
 						)}
 					</div>
 
-					{/* Блок ручного выбора времени слота с кастомным темным календарем */}
+					{/* Блок ручного выбора времени слота */}
 					<div
 						className="mt-3 p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800 flex flex-col gap-3 text-xs select-none relative"
 						ref={calendarRef}
@@ -1322,7 +1363,7 @@ export default function App() {
 											</div>
 										</div>
 
-										{/* Раскрытый блок с вложениями поста и кнопками изменения времени */}
+										{/* Раскрытый блок с кнопками переноса времени и вложениями */}
 										{isExpanded && (
 											<div className="px-4 pb-4 pt-1 border-t border-slate-800/60 bg-slate-950/30">
 												{post.error_message && (
@@ -1331,6 +1372,45 @@ export default function App() {
 															Причина ошибки:
 														</strong>{" "}
 														{post.error_message}
+													</div>
+												)}
+
+												{post.status !==
+													"transferred_to_vk" && (
+													<div className="flex items-center gap-2 mb-3 p-2.5 rounded-xl bg-slate-900 border border-slate-800">
+														<span className="text-xs text-slate-400 font-medium">
+															Перенести:
+														</span>
+														<button
+															onClick={(e) => {
+																e.stopPropagation();
+																handleRescheduleNextSlot(
+																	post.id,
+																);
+															}}
+															className="px-3 py-1.5 rounded-lg bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/30 text-xs font-semibold flex items-center gap-1.5 transition-colors"
+															title="Занять следующий доступный слот по расписанию"
+														>
+															<RotateCcw className="h-3.5 w-3.5" />
+															<span>
+																Следующий слот
+															</span>
+														</button>
+														<button
+															onClick={(e) => {
+																e.stopPropagation();
+																openRescheduleModal(
+																	post,
+																);
+															}}
+															className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-750 text-slate-200 border border-slate-700 text-xs font-medium flex items-center gap-1.5 transition-colors"
+															title="Выбрать точную дату и время вручную"
+														>
+															<Calendar className="h-3.5 w-3.5 text-blue-400" />
+															<span>
+																Задать время
+															</span>
+														</button>
 													</div>
 												)}
 
@@ -1366,44 +1446,6 @@ export default function App() {
 													<span className="text-[11px] text-slate-500 italic">
 														Вложений нет
 													</span>
-												)}
-
-												{/* Кнопки задания времени для постов в локальной очереди или с ошибкой */}
-												{post.status !==
-													"transferred_to_vk" && (
-													<div className="flex items-center gap-2 mt-3 pt-3 border-t border-slate-800/80">
-														<span className="text-[11px] text-slate-400 font-medium">
-															Перенести:
-														</span>
-														<button
-															onClick={() =>
-																handleRescheduleNextSlot(
-																	post.id,
-																)
-															}
-															className="px-2.5 py-1.5 rounded-lg bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/30 text-[11px] font-semibold flex items-center gap-1.5 transition-colors"
-															title="Занять следующий доступный слот по расписанию"
-														>
-															<RotateCcw className="h-3.5 w-3.5" />
-															<span>
-																Следующий слот
-															</span>
-														</button>
-														<button
-															onClick={() =>
-																openRescheduleModal(
-																	post,
-																)
-															}
-															className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-750 text-slate-200 border border-slate-700 text-[11px] font-medium flex items-center gap-1.5 transition-colors"
-															title="Выбрать конкретную дату и время вручную"
-														>
-															<Calendar className="h-3.5 w-3.5 text-blue-400" />
-															<span>
-																Задать время
-															</span>
-														</button>
-													</div>
 												)}
 											</div>
 										)}
@@ -1563,7 +1605,7 @@ export default function App() {
 				</div>
 			)}
 
-			{/* Модальное окно полноразмерного просмотра изображения (Lightbox) */}
+			{/* Модальное окно полноразмерного просмотра изображения */}
 			{fullViewImage && (
 				<div
 					onClick={() => setFullViewImage(null)}
@@ -1594,7 +1636,7 @@ export default function App() {
 							<div className="flex items-center gap-2 text-blue-400">
 								<Key className="h-5 w-5" />
 								<h3 className="font-semibold text-base text-slate-100">
-									Добавить токен (VK)
+									Вход ВКонтакте
 								</h3>
 							</div>
 							<button
@@ -1606,8 +1648,24 @@ export default function App() {
 						</div>
 
 						<div className="space-y-4">
+							<button
+								onClick={handleOpenVkLogin}
+								className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold py-3 rounded-xl shadow-lg shadow-blue-600/25 transition-all text-xs"
+							>
+								<LogIn className="h-4 w-4" />
+								<span>Быстрый вход через ВКонтакте</span>
+							</button>
+
+							<div className="relative flex py-1 items-center">
+								<div className="flex-grow border-t border-slate-800"></div>
+								<span className="flex-shrink mx-3 text-[11px] text-slate-500">
+									или введите токен вручную
+								</span>
+								<div className="flex-grow border-t border-slate-800"></div>
+							</div>
+
 							<div>
-								<label className="block text-xs font-medium text-slate-400 mb-1.5">
+								<label className="block text-[11px] font-medium text-slate-400 mb-1.5">
 									Ключ доступа (User Token или Community
 									Token)
 								</label>
@@ -1620,11 +1678,6 @@ export default function App() {
 										setNewTokenInput(e.target.value)
 									}
 								/>
-								<p className="text-[11px] text-slate-400 mt-2 leading-relaxed">
-									Для публикации фото в паблики используйте{" "}
-									<strong>User Token</strong>{" "}
-									(client_id=6287487).
-								</p>
 							</div>
 						</div>
 
@@ -1640,9 +1693,9 @@ export default function App() {
 								disabled={
 									isAddingToken || !newTokenInput.trim()
 								}
-								className="px-5 py-2 bg-blue-600 rounded-xl text-xs font-semibold text-white hover:bg-blue-500 disabled:opacity-50 transition-colors"
+								className="px-5 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-100 rounded-xl text-xs font-semibold disabled:opacity-50 transition-colors"
 							>
-								{isAddingToken ? "Проверка..." : "Добавить"}
+								{isAddingToken ? "Проверка..." : "Сохранить"}
 							</button>
 						</div>
 					</div>
