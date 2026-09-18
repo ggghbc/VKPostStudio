@@ -1,133 +1,32 @@
-import React, { useState, useEffect, useRef } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import React, { useState, useEffect } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
+import { Header } from "./components/Header";
+import { PostCreator } from "./components/PostCreator";
+import { QueuePanel } from "./components/QueuePanel";
 import {
-	Send,
-	Plus,
-	Trash2,
-	Key,
-	Layers,
-	Clock,
-	RefreshCw,
-	CheckCircle2,
-	AlertCircle,
-	FileText,
-	X,
-	Settings2,
-	UploadCloud,
-	ChevronDown,
-	ChevronUp,
-	ImagePlus,
-	Calendar,
-	ChevronLeft,
-	ChevronRight,
-	Maximize2,
-	RotateCcw,
-	ExternalLink,
-	ClipboardCheck,
-	LayoutGrid,
-	SlidersHorizontal,
-	Cloud,
-	ArrowLeft,
-	ArrowRight,
-	History,
-	PanelRightClose,
-	PanelRightOpen,
-	Undo2,
-	Edit3,
-	HardDriveDownload,
-	CalendarDays,
-	ListFilter,
-	Layers3,
-	Save,
-} from "lucide-react";
+	TokenModal,
+	PatternModal,
+	BatchModal,
+	RevertModal,
+	RescheduleModal,
+	LightboxModal,
+} from "./components/Modals";
+import { api } from "./services/api";
 import {
-	format,
-	addMonths,
-	subMonths,
-	startOfMonth,
-	endOfMonth,
-	eachDayOfInterval,
-	isSameDay,
-	startOfWeek,
-	endOfWeek,
-} from "date-fns";
-import { ru } from "date-fns/locale";
-
-interface Account {
-	id: number;
-	name: string;
-	user_id: number;
-	is_active: boolean;
-}
-
-interface Target {
-	id: number;
-	title: string;
-	owner_id: number;
-	target_type: string;
-}
-
-interface Pattern {
-	id: number;
-	name: string;
-	timezone: string;
-	times_json: string;
-	interval_days: number;
-}
-
-interface AttachmentItem {
-	id: number;
-	file_name: string;
-	size_bytes: number;
-	local_path?: string;
-	vk_attachment_string?: string;
-	thumb_data?: string;
-}
-
-interface PostItem {
-	id: number;
-	text: string;
-	scheduled_at_utc: string;
-	status: string;
-	error_message?: string;
-	attachments_count: number;
-	attachments_view_mode: string;
-	signed: boolean;
-	close_comments: boolean;
-	mute_notifications: boolean;
-	mark_as_ads: boolean;
-	attachments: AttachmentItem[];
-}
-
-interface SyncResult {
-	posts: PostItem[];
-	group_auth_restricted: boolean;
-}
-
-interface FilePreview {
-	path: string;
-	name: string;
-	isImage: boolean;
-	previewUrl?: string;
-}
-
-function cleanTokenInput(raw: string): string {
-	let s = raw.trim();
-	if (s.includes("access_token=")) {
-		const after = s.substring(
-			s.indexOf("access_token=") + "access_token=".length,
-		);
-		s = after.split("&")[0].split("#")[0].trim();
-	}
-	return s.replace(/["';&]/g, "").trim();
-}
+	Account,
+	Target,
+	Pattern,
+	PostItem,
+	FilePreview,
+	Theme,
+} from "./types";
 
 export default function App() {
+	const [theme, setTheme] = useState<Theme>(
+		() => (localStorage.getItem("vk_theme") as Theme) || "classic",
+	);
 	const [accounts, setAccounts] = useState<Account[]>([]);
 	const [activeAccountId, setActiveAccountId] = useState<number | null>(null);
-
 	const [targets, setTargets] = useState<Target[]>([]);
 	const [selectedTargetId, setSelectedTargetId] = useState<number | null>(
 		null,
@@ -148,28 +47,16 @@ export default function App() {
 	const [expandedPostIds, setExpandedPostIds] = useState<number[]>([]);
 	const [nextSlotDisplay, setNextSlotDisplay] = useState<string>("Расчет...");
 	const [isSyncingVk, setIsSyncingVk] = useState(false);
-	const [isGroupTokenAuth, setIsGroupTokenAuth] = useState(false);
-
-	// Режим редактирования существующего поста
-	const [editingPostId, setEditingPostId] = useState<number | null>(null);
-
-	// Сворачивание правой панели
 	const [isRightPanelOpen, setIsRightPanelOpen] = useState(true);
 
-	// Текст и медиа
+	const [editingPostId, setEditingPostId] = useState<number | null>(null);
 	const [postText, setPostText] = useState("");
 	const [attachedFiles, setAttachedFiles] = useState<FilePreview[]>([]);
-	const [isDraggingOver, setIsDraggingOver] = useState(false);
-
-	// Стиль отображения вложений
 	const [attachmentsViewMode, setAttachmentsViewMode] = useState<
 		"grid" | "carousel"
 	>("grid");
-
-	// Модалка полноразмерного просмотра изображения
 	const [fullViewImage, setFullViewImage] = useState<string | null>(null);
 
-	// Календарь для создания поста
 	const [isManualTime, setIsManualTime] = useState(false);
 	const [selectedDate, setSelectedDate] = useState<Date>(new Date());
 	const [pickerHours, setPickerHours] = useState<number>(
@@ -178,14 +65,10 @@ export default function App() {
 	const [pickerMinutes, setPickerMinutes] = useState<number>(0);
 	const [isCalendarOpen, setIsCalendarOpen] = useState(false);
 	const [viewMonth, setViewMonth] = useState<Date>(new Date());
-	const calendarRef = useRef<HTMLDivElement>(null);
-
-	// Календарь контента
 	const [contentCalendarMonth, setContentCalendarMonth] = useState<Date>(
 		new Date(),
 	);
 
-	// Модальное окно изменения времени поста в очереди
 	const [rescheduleModalPost, setRescheduleModalPost] =
 		useState<PostItem | null>(null);
 	const [rescheduleDate, setRescheduleDate] = useState<Date>(new Date());
@@ -195,30 +78,24 @@ export default function App() {
 		new Date(),
 	);
 
-	// Модальное окно возвращения поста из ВК
 	const [revertModalPost, setRevertModalPost] = useState<PostItem | null>(
 		null,
 	);
-
-	// Модальное окно пакетной генерации
 	const [showBatchModal, setShowBatchModal] = useState(false);
 	const [batchChunkSize, setBatchChunkSize] = useState<number>(1);
 	const [isBatchCreating, setIsBatchCreating] = useState(false);
 
-	// Настройки публикации
 	const [commentsOnPost, setCommentsOnPost] = useState(true);
 	const [notifyFollowers, setNotifyFollowers] = useState(true);
 	const [authorsName, setAuthorsName] = useState(false);
 	const [adFromCreator, setAdFromCreator] = useState(false);
 	const [isSettingsOpen, setIsSettingsOpen] = useState(true);
 
-	// Состояние отправки
 	const [isTransferring, setIsTransferring] = useState(false);
 	const [transferProgress, setTransferProgress] = useState<string | null>(
 		null,
 	);
 
-	// Модальные окна
 	const [showTokenModal, setShowTokenModal] = useState(false);
 	const [newTokenInput, setNewTokenInput] = useState("");
 	const [isAddingToken, setIsAddingToken] = useState(false);
@@ -231,18 +108,26 @@ export default function App() {
 	const [newPatternIntervalDays, setNewPatternIntervalDays] =
 		useState<number>(1);
 
-	const syncClientTimezone = async () => {
-		try {
-			const clientTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-			await invoke("init_client_timezone", { timezone: clientTz });
-		} catch (e) {
-			console.error("Ошибка таймзоны:", e);
-		}
+	// Смена темы
+	const handleSetTheme = (newTheme: Theme) => {
+		setTheme(newTheme);
+		localStorage.setItem("vk_theme", newTheme);
+		document.documentElement.setAttribute("data-theme", newTheme);
 	};
+
+	useEffect(() => {
+		document.documentElement.setAttribute("data-theme", theme);
+		api.initTimezone(Intl.DateTimeFormat().resolvedOptions().timeZone).then(
+			() => {
+				loadAccounts();
+				loadPatterns();
+			},
+		);
+	}, []);
 
 	const loadAccounts = async () => {
 		try {
-			const accs = await invoke<Account[]>("get_accounts");
+			const accs = await api.getAccounts();
 			setAccounts(accs);
 			const active = accs.find((a) => a.is_active) ?? accs[0] ?? null;
 			if (active) {
@@ -254,266 +139,87 @@ export default function App() {
 				setSelectedTargetId(null);
 			}
 		} catch (e) {
-			console.error("Ошибка загрузки аккаунтов:", e);
+			console.error(e);
 		}
 	};
 
 	const loadTargetsForAccount = async (accId: number) => {
 		try {
-			const tgts = await invoke<Target[]>("get_targets", {
-				accountId: accId,
-			});
+			const tgts = await api.getTargets(accId);
 			setTargets(tgts);
 			if (tgts.length > 0) {
-				setSelectedTargetId((prev) => {
-					if (prev && tgts.some((t) => t.id === prev)) {
-						return prev;
-					}
-					return tgts[0].id;
-				});
+				setSelectedTargetId((prev) =>
+					prev && tgts.some((t) => t.id === prev) ? prev : tgts[0].id,
+				);
 			} else {
 				setSelectedTargetId(null);
 			}
 		} catch (e) {
-			console.error("Ошибка загрузки целей:", e);
+			console.error(e);
 		}
 	};
 
 	const loadPatterns = async () => {
 		try {
-			const ptrns = await invoke<Pattern[]>("get_patterns");
+			const ptrns = await api.getPatterns();
 			setPatterns(ptrns);
-			if (ptrns.length > 0) {
+			if (ptrns.length > 0)
 				setSelectedPatternId((prev) => prev ?? ptrns[0].id);
-			}
 		} catch (e) {
-			console.error("Ошибка паттернов:", e);
+			console.error(e);
 		}
 	};
 
-	const loadHistory = async (targetId: number) => {
+	const loadHistory = async (tId: number) => {
 		try {
-			const hist = await invoke<PostItem[]>("get_post_history", {
-				targetId,
-			});
+			const hist = await api.getHistory(tId);
 			setHistoryPosts(hist);
 		} catch (e) {
-			console.error("Ошибка загрузки истории:", e);
+			console.error(e);
 		}
 	};
 
-	const syncVkQueue = async (targetId: number) => {
+	const syncVkQueue = async (tId: number) => {
 		setIsSyncingVk(true);
 		try {
-			const res = await invoke<SyncResult>("sync_vk_delayed_posts", {
-				targetId,
-			});
+			const res = await api.syncVkQueue(tId);
 			setQueue(res.posts);
-			setIsGroupTokenAuth(res.group_auth_restricted);
-			loadHistory(targetId);
+			loadHistory(tId);
 		} catch (e) {
-			console.error("Ошибка синхронизации:", e);
+			console.error(e);
 			try {
-				const q = await invoke<PostItem[]>("get_queue", { targetId });
+				const q = await api.getQueue(tId);
 				setQueue(q);
-				loadHistory(targetId);
+				loadHistory(tId);
 			} catch {}
 		} finally {
 			setIsSyncingVk(false);
 		}
 	};
 
-	const updateNextSlotPreview = async () => {
+	useEffect(() => {
+		if (selectedTargetId) syncVkQueue(selectedTargetId);
+	}, [selectedTargetId]);
+
+	useEffect(() => {
 		if (!selectedTargetId || !selectedPatternId) {
 			setNextSlotDisplay("Выберите цель");
 			return;
 		}
-		try {
-			const isoSlot = await invoke<string>("get_next_slot_preview", {
-				targetId: selectedTargetId,
-				patternId: selectedPatternId,
-			});
-			const date = new Date(isoSlot);
-			setNextSlotDisplay(format(date, "dd/MM/yyyy HH:mm"));
-			if (!isManualTime) {
-				setSelectedDate(date);
-				setPickerHours(date.getHours());
-				setPickerMinutes(date.getMinutes());
-			}
-		} catch {
-			setNextSlotDisplay("Нет свободных слотов");
-		}
-	};
-
-	useEffect(() => {
-		syncClientTimezone().then(() => {
-			loadAccounts();
-			loadPatterns();
-		});
-	}, []);
-
-	useEffect(() => {
-		if (selectedTargetId) {
-			syncVkQueue(selectedTargetId);
-		}
-	}, [selectedTargetId]);
-
-	useEffect(() => {
-		updateNextSlotPreview();
+		api.getNextSlot(selectedTargetId, selectedPatternId)
+			.then((iso) => {
+				const d = new Date(iso);
+				setNextSlotDisplay(format(d, "dd/MM/yyyy HH:mm"));
+				if (!isManualTime) {
+					setSelectedDate(d);
+					setPickerHours(d.getHours());
+					setPickerMinutes(d.getMinutes());
+				}
+			})
+			.catch(() => setNextSlotDisplay("Нет свободных слотов"));
 	}, [selectedTargetId, selectedPatternId, queue]);
 
-	const appendFiles = async (paths: string[]) => {
-		const newItems: FilePreview[] = await Promise.all(
-			paths.map(async (path) => {
-				const name = path.split(/[\\/]/).pop() || "файл";
-				const ext = name.split(".").pop()?.toLowerCase() || "";
-				const isImage = [
-					"jpg",
-					"jpeg",
-					"png",
-					"webp",
-					"gif",
-					"bmp",
-				].includes(ext);
-				let previewUrl: string | undefined = undefined;
-
-				if (isImage) {
-					try {
-						previewUrl = await invoke<string>(
-							"get_file_preview_base64",
-							{ path },
-						);
-					} catch (e) {
-						console.error("Ошибка превью:", e);
-					}
-				}
-
-				return { path, name, isImage, previewUrl };
-			}),
-		);
-
-		setAttachedFiles((prev) => {
-			const combined = [...prev, ...newItems];
-			return combined.slice(0, 10);
-		});
-	};
-
-	useEffect(() => {
-		const unlistenDrop = listen<any>("tauri://drag-drop", (event) => {
-			setIsDraggingOver(false);
-			const paths: string[] = event.payload?.paths || [];
-			if (paths.length > 0) {
-				appendFiles(paths);
-			}
-		});
-
-		const unlistenEnter = listen("tauri://drag-enter", () =>
-			setIsDraggingOver(true),
-		);
-		const unlistenLeave = listen("tauri://drag-leave", () =>
-			setIsDraggingOver(false),
-		);
-
-		const unlistenProgress = listen("transfer-progress", (event: any) => {
-			const { current, total } = event.payload;
-			setTransferProgress(`Перенос ${current} из ${total}...`);
-		});
-
-		const unlistenFinish = listen("transfer-finished", (event: any) => {
-			setIsTransferring(false);
-			setTransferProgress(null);
-			if (selectedTargetId) {
-				syncVkQueue(selectedTargetId);
-			}
-			if (event.payload?.error) {
-				alert(event.payload.error);
-			}
-		});
-
-		return () => {
-			unlistenDrop.then((f) => f());
-			unlistenEnter.then((f) => f());
-			unlistenLeave.then((f) => f());
-			unlistenProgress.then((f) => f());
-			unlistenFinish.then((f) => f());
-		};
-	}, [selectedTargetId]);
-
-	useEffect(() => {
-		function handleClickOutside(event: MouseEvent) {
-			if (
-				calendarRef.current &&
-				!calendarRef.current.contains(event.target as Node)
-			) {
-				setIsCalendarOpen(false);
-			}
-		}
-		document.addEventListener("mousedown", handleClickOutside);
-		return () =>
-			document.removeEventListener("mousedown", handleClickOutside);
-	}, []);
-
-	const handleOpenBrowserForLogin = async () => {
-		try {
-			await invoke("open_vk_auth_browser");
-		} catch (e) {
-			alert("Не удалось открыть браузер: " + e);
-		}
-	};
-
-	const handlePasteFromClipboard = async () => {
-		try {
-			const text = await navigator.clipboard.readText();
-			setNewTokenInput(cleanTokenInput(text));
-		} catch (e) {
-			alert("Не удалось прочитать буфер обмена: " + e);
-		}
-	};
-
-	const handleSwitchAccount = async (accId: number) => {
-		try {
-			await invoke("switch_account", { accountId: accId });
-			setActiveAccountId(accId);
-			await loadTargetsForAccount(accId);
-		} catch (e) {
-			alert("Ошибка: " + e);
-		}
-	};
-
-	const handleAddToken = async () => {
-		const token = cleanTokenInput(newTokenInput);
-		if (!token) return;
-		setIsAddingToken(true);
-		try {
-			const created = await invoke<Account>("add_token", {
-				rawToken: token,
-			});
-			setNewTokenInput("");
-			setShowTokenModal(false);
-			await loadAccounts();
-			setActiveAccountId(created.id);
-			await loadTargetsForAccount(created.id);
-		} catch (e) {
-			alert("Не удалось добавить токен: " + e);
-		} finally {
-			setIsAddingToken(false);
-		}
-	};
-
-	const handleDeleteAccount = async () => {
-		if (!activeAccountId) return;
-		const current = accounts.find((a) => a.id === activeAccountId);
-		if (!confirm(`Удалить токен "${current?.name}"?`)) return;
-
-		try {
-			await invoke("delete_account", { accountId: activeAccountId });
-			await loadAccounts();
-		} catch (e) {
-			alert("Ошибка удаления: " + e);
-		}
-	};
-
-	const handleSelectFiles = async () => {
+	const handleAddFiles = async () => {
 		const res = await open({
 			multiple: true,
 			filters: [
@@ -521,381 +227,89 @@ export default function App() {
 					name: "Изображения",
 					extensions: ["jpg", "jpeg", "png", "webp", "gif", "bmp"],
 				},
-				{
-					name: "Документы",
-					extensions: ["pdf", "zip", "doc", "docx"],
-				},
 			],
 		});
-
 		if (res) {
 			const paths = Array.isArray(res) ? res : [res];
-			appendFiles(paths);
+			const items = await Promise.all(
+				paths.map(async (path) => ({
+					path,
+					name: path.split(/[\\/]/).pop() || "файл",
+					isImage: true,
+					previewUrl: await api
+						.getFilePreview(path)
+						.catch(() => undefined),
+				})),
+			);
+			setAttachedFiles((prev) => [...prev, ...items].slice(0, 10));
 		}
-	};
-
-	const moveFile = (from: number, to: number) => {
-		if (
-			from === to ||
-			from < 0 ||
-			to < 0 ||
-			from >= attachedFiles.length ||
-			to >= attachedFiles.length
-		)
-			return;
-		setAttachedFiles((prev) => {
-			const updated = [...prev];
-			const [moved] = updated.splice(from, 1);
-			updated.splice(to, 0, moved);
-			return updated;
-		});
-	};
-
-	const handleCreatePattern = async () => {
-		if (!newPatternName.trim()) {
-			alert("Укажите название");
-			return;
-		}
-		const timesArray = newPatternTimes
-			.split(",")
-			.map((t) => t.trim())
-			.filter((t) => /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/.test(t));
-
-		if (timesArray.length === 0) {
-			alert("Укажите время ЧЧ:ММ (напр. 14:00, 18:00)");
-			return;
-		}
-
-		try {
-			const clientTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-			const created = await invoke<Pattern>("create_pattern", {
-				name: newPatternName.trim(),
-				times: timesArray,
-				timezone: clientTz,
-				intervalDays: newPatternIntervalDays,
-			});
-			setPatterns((prev) => [...prev, created]);
-			setSelectedPatternId(created.id);
-			setShowPatternModal(false);
-			setNewPatternName("");
-		} catch (e) {
-			alert("Ошибка создания: " + e);
-		}
-	};
-
-	const handleLoadPostToEditor = (post: PostItem) => {
-		setEditingPostId(post.id);
-		setPostText(post.text);
-		setAuthorsName(post.signed);
-		setCommentsOnPost(!post.close_comments);
-		setNotifyFollowers(!post.mute_notifications);
-		setAdFromCreator(post.mark_as_ads);
-		setAttachmentsViewMode(
-			post.attachments_view_mode === "carousel" ? "carousel" : "grid",
-		);
-
-		const convertedFiles: FilePreview[] = post.attachments.map((att) => ({
-			path: att.local_path || "",
-			name: att.file_name,
-			isImage: true,
-			previewUrl: att.thumb_data,
-		}));
-		setAttachedFiles(convertedFiles);
-		setIsRightPanelOpen(true);
-	};
-
-	const handleCancelEditing = () => {
-		setEditingPostId(null);
-		setPostText("");
-		setAttachedFiles([]);
 	};
 
 	const handleSavePost = async () => {
-		if (!postText.trim() && attachedFiles.length === 0) {
-			alert("Добавьте текст или медиафайл");
-			return;
-		}
-		if (!selectedTargetId || !selectedPatternId) {
-			alert("Выберите сообщество");
-			return;
-		}
+		if (!postText.trim() && attachedFiles.length === 0)
+			return alert("Добавьте текст или медиафайл");
+		if (!selectedTargetId || !selectedPatternId)
+			return alert("Выберите сообщество");
 
 		if (editingPostId) {
-			try {
-				await invoke("update_post", {
-					postId: editingPostId,
-					text: postText.trim(),
-					signed: authorsName,
-					closeComments: !commentsOnPost,
-					muteNotifications: !notifyFollowers,
-					markAsAds: adFromCreator,
-					attachmentsViewMode,
-					filePaths: attachedFiles
-						.map((f) => f.path)
-						.filter((p) => p.length > 0),
-				});
-				setEditingPostId(null);
-				setPostText("");
-				setAttachedFiles([]);
-				if (selectedTargetId) {
-					syncVkQueue(selectedTargetId);
-				}
-			} catch (e) {
-				alert("Ошибка обновления поста: " + e);
-			}
-			return;
-		}
-
-		let customIso: string | null = null;
-		if (isManualTime) {
-			const targetDate = new Date(selectedDate);
-			targetDate.setHours(pickerHours, pickerMinutes, 0, 0);
-			customIso = targetDate.toISOString();
-		}
-
-		try {
-			await invoke("add_post_to_queue", {
-				targetId: selectedTargetId,
-				patternId: selectedPatternId,
+			await api.updatePost({
+				postId: editingPostId,
 				text: postText.trim(),
 				signed: authorsName,
 				closeComments: !commentsOnPost,
 				muteNotifications: !notifyFollowers,
 				markAsAds: adFromCreator,
 				attachmentsViewMode,
-				customScheduledAt: customIso,
-				filePaths: attachedFiles.map((f) => f.path),
+				filePaths: attachedFiles
+					.map((f) => f.path)
+					.filter((p) => p.length > 0),
 			});
-
+			setEditingPostId(null);
 			setPostText("");
 			setAttachedFiles([]);
-			setIsManualTime(false);
-			if (selectedTargetId) {
-				syncVkQueue(selectedTargetId);
-			}
-		} catch (e) {
-			alert("Ошибка добавления поста: " + e);
+			syncVkQueue(selectedTargetId);
+			return;
 		}
+
+		const customIso = isManualTime
+			? new Date(
+					selectedDate.setHours(pickerHours, pickerMinutes, 0, 0),
+				).toISOString()
+			: null;
+		await api.addPost({
+			targetId: selectedTargetId,
+			patternId: selectedPatternId,
+			text: postText.trim(),
+			signed: authorsName,
+			closeComments: !commentsOnPost,
+			muteNotifications: !notifyFollowers,
+			markAsAds: adFromCreator,
+			attachmentsViewMode,
+			customScheduledAt: customIso,
+			filePaths: attachedFiles.map((f) => f.path),
+		});
+
+		setPostText("");
+		setAttachedFiles([]);
+		setIsManualTime(false);
+		syncVkQueue(selectedTargetId);
 	};
 
-	const handleCleanLocalFiles = async () => {
-		if (!selectedTargetId) return;
+	const handleCleanExpiredTokens = async () => {
 		if (
 			!confirm(
-				"Удалить с диска исходные файлы постов, которые уже успешно находятся в отложке ВК? Миниатюры в приложении сохранятся.",
+				"Проверить все токены через VK API и удалить те, у которых истек срок действия или сменился IP?",
 			)
 		)
 			return;
-
 		try {
-			const count = await invoke<number>("clean_uploaded_local_files", {
-				targetId: selectedTargetId,
-			});
-			alert(`Очистка завершена. Освобождено файлов: ${count} шт.`);
-			if (selectedTargetId) syncVkQueue(selectedTargetId);
+			const deleted = await api.cleanExpiredTokens();
+			alert(`Удалено недействительных токенов: ${deleted}`);
+			loadAccounts();
 		} catch (e) {
-			alert("Ошибка очистки файлов: " + e);
+			alert("Ошибка: " + e);
 		}
 	};
-
-	const handleBatchCreate = async () => {
-		if (attachedFiles.length === 0) {
-			alert("Сначала прикрепите файлы для пакетной генерации");
-			return;
-		}
-		if (!selectedTargetId || !selectedPatternId) {
-			alert("Выберите сообщество");
-			return;
-		}
-		setIsBatchCreating(true);
-		try {
-			const count = await invoke<number>("batch_create_posts", {
-				targetId: selectedTargetId,
-				patternId: selectedPatternId,
-				filePaths: attachedFiles.map((f) => f.path),
-				itemsPerPost: batchChunkSize,
-				text: postText.trim(),
-				signed: authorsName,
-				closeComments: !commentsOnPost,
-				muteNotifications: !notifyFollowers,
-				markAsAds: adFromCreator,
-				attachmentsViewMode,
-			});
-
-			setShowBatchModal(false);
-			setPostText("");
-			setAttachedFiles([]);
-			if (selectedTargetId) syncVkQueue(selectedTargetId);
-			alert(
-				`Успешно создано и расставлено по слотам постов: ${count} шт.`,
-			);
-		} catch (e) {
-			alert("Ошибка пакетного создания: " + e);
-		} finally {
-			setIsBatchCreating(false);
-		}
-	};
-
-	const handleDeleteLocalPost = async (id: number) => {
-		await invoke("delete_local_post", { postId: id });
-		if (selectedTargetId) {
-			syncVkQueue(selectedTargetId);
-		}
-	};
-
-	const handleDeleteVkPost = async (id: number) => {
-		if (!confirm("Удалить этот отложенный пост со стены ВКонтакте?"))
-			return;
-		await invoke("delete_vk_post", { postId: id });
-		if (selectedTargetId) {
-			syncVkQueue(selectedTargetId);
-		}
-	};
-
-	const handleDeleteHistoryPost = async (id: number) => {
-		if (!confirm("Удалить запись из истории публикаций?")) return;
-		await invoke("delete_history_post", { postId: id });
-		if (selectedTargetId) {
-			loadHistory(selectedTargetId);
-		}
-	};
-
-	const handleRevertSameTime = async (postId: number) => {
-		try {
-			await invoke("revert_vk_post_to_local_same_time", { postId });
-			setRevertModalPost(null);
-			if (selectedTargetId) {
-				syncVkQueue(selectedTargetId);
-			}
-			setActiveQueueTab("local");
-		} catch (e) {
-			alert("Ошибка возврата поста: " + e);
-		}
-	};
-
-	const handleRevertNextSlot = async (postId: number) => {
-		if (!selectedPatternId) {
-			alert("Выберите паттерн");
-			return;
-		}
-		try {
-			await invoke("revert_vk_post_to_local_next_slot", {
-				postId,
-				patternId: selectedPatternId,
-			});
-			setRevertModalPost(null);
-			if (selectedTargetId) {
-				syncVkQueue(selectedTargetId);
-			}
-			setActiveQueueTab("local");
-		} catch (e) {
-			alert("Ошибка возврата поста: " + e);
-		}
-	};
-
-	const handleRescheduleNextSlot = async (postId: number) => {
-		if (!selectedPatternId) {
-			alert("Выберите паттерн");
-			return;
-		}
-		try {
-			await invoke("reschedule_post_next_slot", {
-				postId,
-				patternId: selectedPatternId,
-			});
-			if (selectedTargetId) {
-				syncVkQueue(selectedTargetId);
-			}
-		} catch (e) {
-			alert("Ошибка переноса: " + e);
-		}
-	};
-
-	const openRescheduleModal = (post: PostItem) => {
-		const postDate = new Date(post.scheduled_at_utc);
-		const validDate =
-			isNaN(postDate.getTime()) || postDate <= new Date()
-				? new Date()
-				: postDate;
-		setRescheduleModalPost(post);
-		setRescheduleDate(validDate);
-		setRescheduleHours(validDate.getHours());
-		setRescheduleMinutes(validDate.getMinutes());
-		setRescheduleViewMonth(validDate);
-	};
-
-	const confirmRescheduleCustom = async () => {
-		if (!rescheduleModalPost) return;
-		const targetDate = new Date(rescheduleDate);
-		targetDate.setHours(rescheduleHours, rescheduleMinutes, 0, 0);
-
-		try {
-			await invoke("reschedule_post_custom", {
-				postId: rescheduleModalPost.id,
-				customTimeUtc: targetDate.toISOString(),
-			});
-			setRescheduleModalPost(null);
-			if (selectedTargetId) {
-				syncVkQueue(selectedTargetId);
-			}
-		} catch (e) {
-			alert("Ошибка установки времени: " + e);
-		}
-	};
-
-	const handleStartTransfer = async () => {
-		if (!selectedTargetId) return;
-		setIsTransferring(true);
-		setTransferProgress("Отправка в VK...");
-		try {
-			await invoke("start_transfer_pipeline", {
-				targetId: selectedTargetId,
-			});
-		} catch (e) {
-			alert("Ошибка запуска: " + e);
-			setIsTransferring(false);
-			setTransferProgress(null);
-		}
-	};
-
-	const toggleExpandPost = (id: number) => {
-		setExpandedPostIds((prev) =>
-			prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id],
-		);
-	};
-
-	const monthStart = startOfMonth(viewMonth);
-	const monthEnd = endOfMonth(viewMonth);
-	const calendarStart = startOfWeek(monthStart, { weekStartsOn: 1 });
-	const calendarEnd = endOfWeek(monthEnd, { weekStartsOn: 1 });
-	const daysInCalendar = eachDayOfInterval({
-		start: calendarStart,
-		end: calendarEnd,
-	});
-
-	const contentMonthStart = startOfMonth(contentCalendarMonth);
-	const contentMonthEnd = endOfMonth(contentCalendarMonth);
-	const contentCalStart = startOfWeek(contentMonthStart, { weekStartsOn: 1 });
-	const contentCalEnd = endOfWeek(contentMonthEnd, { weekStartsOn: 1 });
-	const contentDays = eachDayOfInterval({
-		start: contentCalStart,
-		end: contentCalEnd,
-	});
-
-	const getCustomDisplayString = () => {
-		const d = new Date(selectedDate);
-		d.setHours(pickerHours, pickerMinutes, 0, 0);
-		return format(d, "dd/MM/yyyy HH:mm");
-	};
-
-	const resMonthStart = startOfMonth(rescheduleViewMonth);
-	const resMonthEnd = endOfMonth(rescheduleViewMonth);
-	const resCalendarStart = startOfWeek(resMonthStart, { weekStartsOn: 1 });
-	const resCalendarEnd = endOfWeek(resMonthEnd, { weekStartsOn: 1 });
-	const resDaysInCalendar = eachDayOfInterval({
-		start: resCalendarStart,
-		end: resCalendarEnd,
-	});
 
 	const localPosts = queue.filter(
 		(p) => p.status === "queued" || p.status === "failed",
@@ -903,7 +317,6 @@ export default function App() {
 	const vkDelayedPosts = queue.filter(
 		(p) => p.status === "transferred_to_vk",
 	);
-
 	const displayedPosts =
 		activeQueueTab === "local"
 			? localPosts
@@ -912,1836 +325,343 @@ export default function App() {
 				: historyPosts;
 
 	return (
-		<div className="flex flex-col h-screen bg-slate-950 text-slate-100 relative">
-			{/* Шапка */}
-			<header className="flex items-center justify-between border-b border-slate-800 bg-slate-900/80 px-6 py-3 select-none">
-				<div className="flex items-center gap-6">
-					<div className="flex items-center gap-2.5">
-						<div className="p-1.5 rounded-lg bg-blue-600/20 text-blue-400">
-							<Layers className="h-5 w-5" />
-						</div>
-						<span className="font-bold tracking-tight text-base">
-							VK Post Studio
-						</span>
-					</div>
+		<div className="flex flex-col h-screen relative">
+			<Header
+				accounts={accounts}
+				activeAccountId={activeAccountId}
+				targets={targets}
+				selectedTargetId={selectedTargetId}
+				theme={theme}
+				isRightPanelOpen={isRightPanelOpen}
+				onSwitchAccount={async (id) => {
+					await api.switchAccount(id);
+					setActiveAccountId(id);
+					loadTargetsForAccount(id);
+				}}
+				onDeleteAccount={async () => {
+					if (!activeAccountId || !confirm("Удалить этот токен?"))
+						return;
+					await api.deleteAccount(activeAccountId);
+					loadAccounts();
+				}}
+				onOpenTokenModal={() => setShowTokenModal(true)}
+				onSelectTarget={setSelectedTargetId}
+				onSetTheme={handleSetTheme}
+				onToggleRightPanel={() =>
+					setIsRightPanelOpen(!isRightPanelOpen)
+				}
+			/>
 
-					<div className="flex items-center gap-2">
-						<span className="text-xs text-slate-400 font-medium">
-							Токен:
-						</span>
-						{accounts.length > 0 ? (
-							<div className="flex items-center gap-1.5">
-								<select
-									className="rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-semibold text-slate-100 border border-slate-700 focus:outline-none focus:border-blue-500 cursor-pointer max-w-[280px] truncate"
-									value={activeAccountId || ""}
-									onChange={(e) =>
-										handleSwitchAccount(
-											Number(e.target.value),
-										)
-									}
-								>
-									{accounts.map((acc) => (
-										<option key={acc.id} value={acc.id}>
-											{acc.name}
-										</option>
-									))}
-								</select>
-
-								<button
-									onClick={handleDeleteAccount}
-									className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-800 transition-colors"
-									title="Удалить этот токен"
-								>
-									<Trash2 className="h-3.5 w-3.5" />
-								</button>
-							</div>
-						) : (
-							<span className="text-xs text-amber-400/90 font-medium">
-								Нет токенов
-							</span>
-						)}
-
-						{accounts.length === 0 && (
-							<button
-								onClick={handleOpenBrowserForLogin}
-								className="flex items-center gap-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 px-3.5 py-1.5 text-xs font-semibold text-white transition-colors shadow-md shadow-blue-600/20"
-							>
-								<ExternalLink className="h-3.5 w-3.5" />
-								<span>Войти через VK</span>
-							</button>
-						)}
-
-						<button
-							onClick={() => setShowTokenModal(true)}
-							className="flex items-center gap-1.5 rounded-lg bg-slate-800 text-slate-300 border border-slate-700 hover:border-slate-600 px-3 py-1.5 text-xs font-medium hover:bg-slate-750 transition-colors"
-						>
-							<Plus className="h-3.5 w-3.5 text-slate-400" />
-							<span>Добавить токен</span>
-						</button>
-					</div>
-				</div>
-
-				<div className="flex items-center gap-3">
-					{targets.length > 1 && (
-						<div className="flex items-center gap-2 bg-slate-800/80 rounded-lg px-2.5 py-1 border border-slate-700/60">
-							<span className="text-xs text-slate-400">
-								Цель:
-							</span>
-							<select
-								className="bg-transparent text-xs font-medium text-slate-200 focus:outline-none cursor-pointer"
-								value={selectedTargetId || ""}
-								onChange={(e) =>
-									setSelectedTargetId(Number(e.target.value))
-								}
-							>
-								{targets.map((t) => (
-									<option
-										key={t.id}
-										value={t.id}
-										className="bg-slate-900 text-slate-100"
-									>
-										{t.title}
-									</option>
-								))}
-							</select>
-						</div>
-					)}
-
-					<button
-						onClick={() => setIsRightPanelOpen(!isRightPanelOpen)}
-						className={`p-1.5 rounded-lg border transition-colors ${
-							isRightPanelOpen
-								? "bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-750"
-								: "bg-blue-600/20 border-blue-500/40 text-blue-400 hover:bg-blue-600/30"
-						}`}
-						title={
-							isRightPanelOpen
-								? "Свернуть панель очереди"
-								: "Развернуть панель очереди"
-						}
-					>
-						{isRightPanelOpen ? (
-							<PanelRightClose className="h-4 w-4" />
-						) : (
-							<PanelRightOpen className="h-4 w-4" />
-						)}
-					</button>
-				</div>
-			</header>
-
-			{/* Основное пространство */}
 			<main className="flex flex-1 overflow-hidden relative">
-				{/* Левая панель */}
-				<section
-					className={`flex flex-col border-r border-slate-800 p-6 overflow-y-auto transition-all duration-300 ease-in-out ${
-						isRightPanelOpen
-							? "w-1/2"
-							: "w-full max-w-4xl mx-auto border-r-0"
-					}`}
-				>
-					<div className="mb-3 flex items-center justify-between">
-						<div className="flex items-center gap-2">
-							<h2 className="text-sm font-semibold tracking-wide text-slate-300">
-								{editingPostId
-									? `РЕДАКТИРОВАНИЕ ПОСТА #${editingPostId}`
-									: "СОЗДАНИЕ ЗАПИСИ"}
-							</h2>
-							{editingPostId && (
-								<span className="px-2 py-0.5 rounded bg-blue-500/20 border border-blue-500/30 text-[10px] font-semibold text-blue-300">
-									Режим правки
-								</span>
-							)}
-						</div>
+				<PostCreator
+					editingPostId={editingPostId}
+					postText={postText}
+					attachedFiles={attachedFiles}
+					isRightPanelOpen={isRightPanelOpen}
+					patterns={patterns}
+					selectedPatternId={selectedPatternId}
+					attachmentsViewMode={attachmentsViewMode}
+					commentsOnPost={commentsOnPost}
+					notifyFollowers={notifyFollowers}
+					authorsName={authorsName}
+					adFromCreator={adFromCreator}
+					isSettingsOpen={isSettingsOpen}
+					isManualTime={isManualTime}
+					selectedDate={selectedDate}
+					pickerHours={pickerHours}
+					pickerMinutes={pickerMinutes}
+					isCalendarOpen={isCalendarOpen}
+					viewMonth={viewMonth}
+					nextSlotDisplay={nextSlotDisplay}
+					selectedTargetId={selectedTargetId}
+					onTextChange={setPostText}
+					onSelectPattern={setSelectedPatternId}
+					onOpenPatternModal={() => setShowPatternModal(true)}
+					onSelectFiles={handleAddFiles}
+					onMoveFile={(f, t) => {
+						const arr = [...attachedFiles];
+						const [moved] = arr.splice(f, 1);
+						arr.splice(t, 0, moved);
+						setAttachedFiles(arr);
+					}}
+					onRemoveFile={(i) =>
+						setAttachedFiles((prev) =>
+							prev.filter((_, idx) => idx !== i),
+						)
+					}
+					onSetFullView={setFullViewImage}
+					onOpenBatchModal={() => setShowBatchModal(true)}
+					onSetViewMode={setAttachmentsViewMode}
+					onToggleComments={setCommentsOnPost}
+					onToggleNotify={setNotifyFollowers}
+					onToggleAuthor={setAuthorsName}
+					onToggleAd={setAdFromCreator}
+					onToggleSettings={() => setIsSettingsOpen(!isSettingsOpen)}
+					onToggleManualTime={setIsManualTime}
+					onToggleCalendar={() => setIsCalendarOpen(!isCalendarOpen)}
+					onSetViewMonth={setViewMonth}
+					onSetSelectedDate={setSelectedDate}
+					onSetPickerHours={setPickerHours}
+					onSetPickerMinutes={setPickerMinutes}
+					onCancelEditing={() => {
+						setEditingPostId(null);
+						setPostText("");
+						setAttachedFiles([]);
+					}}
+					onSavePost={handleSavePost}
+				/>
 
-						<div className="flex items-center gap-2">
-							<div className="flex items-center gap-1.5 bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1">
-								<Clock className="h-3.5 w-3.5 text-slate-400" />
-								<select
-									className="bg-transparent text-xs text-slate-200 focus:outline-none cursor-pointer"
-									value={selectedPatternId || ""}
-									onChange={(e) =>
-										setSelectedPatternId(
-											Number(e.target.value),
-										)
-									}
-								>
-									{patterns.map((p) => (
-										<option
-											key={p.id}
-											value={p.id}
-											className="bg-slate-900"
-										>
-											{p.name}{" "}
-											{p.interval_days > 1
-												? `(раз в ${p.interval_days} дн.)`
-												: ""}
-										</option>
-									))}
-								</select>
-							</div>
-
-							<button
-								onClick={() => setShowPatternModal(true)}
-								className="p-1 rounded-lg border border-slate-800 bg-slate-900 text-slate-400 hover:text-blue-400 hover:bg-slate-800 transition-colors"
-								title="Настроить паттерн"
-							>
-								<Settings2 className="h-4 w-4" />
-							</button>
-						</div>
-					</div>
-
-					<div className="mb-3">
-						<textarea
-							className="w-full h-16 min-h-[4rem] max-h-32 rounded-xl bg-slate-900/90 p-3 text-xs text-slate-100 placeholder-slate-500 border border-slate-800 focus:outline-none focus:border-blue-500 transition-colors resize-none overflow-y-auto leading-relaxed"
-							placeholder="Текст записи (необязательно)..."
-							value={postText}
-							maxLength={15895}
-							onChange={(e) => setPostText(e.target.value)}
-						/>
-						<div className="flex justify-end mt-1 px-1">
-							<span
-								className={`text-[10px] font-mono ${
-									postText.length > 14000
-										? "text-amber-400"
-										: "text-slate-500"
-								}`}
-							>
-								{postText.length} / 15 895 символов
-							</span>
-						</div>
-					</div>
-
-					<div className="flex-1 flex flex-col min-h-[190px]">
-						{attachedFiles.length === 0 ? (
-							<div
-								onClick={handleSelectFiles}
-								className={`flex-1 flex flex-col items-center justify-center border-2 border-dashed rounded-2xl cursor-pointer p-6 transition-all duration-200 ${
-									isDraggingOver
-										? "border-blue-500 bg-blue-500/10 scale-[0.99]"
-										: "border-slate-800 bg-slate-900/40 hover:bg-slate-900/70 hover:border-slate-700"
-								}`}
-							>
-								<div className="p-3.5 rounded-2xl bg-slate-800/80 text-blue-400 mb-3 shadow-inner">
-									<UploadCloud className="h-7 w-7" />
-								</div>
-								<span className="text-xs font-semibold text-slate-200">
-									Перетащите изображения сюда
-								</span>
-								<span className="text-[11px] text-slate-500 mt-1">
-									или нажмите для выбора файлов (до 10 шт.)
-								</span>
-							</div>
-						) : (
-							<div className="flex-1 flex flex-col bg-slate-900/60 border border-slate-800 rounded-2xl p-3.5 overflow-hidden">
-								<div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-800 text-xs">
-									<div className="flex items-center gap-2">
-										<span className="font-semibold text-slate-300">
-											Прикрепленные файлы
-										</span>
-										<span
-											className={`text-[11px] font-mono px-2 py-0.5 rounded-md ${
-												attachedFiles.length >= 10
-													? "bg-amber-500/20 text-amber-300"
-													: "bg-slate-800 text-slate-400"
-											}`}
-										>
-											{attachedFiles.length} / 10 медиа
-										</span>
-									</div>
-
-									<div className="flex items-center gap-2">
-										{!editingPostId &&
-											attachedFiles.length > 1 && (
-												<button
-													onClick={() =>
-														setShowBatchModal(true)
-													}
-													className="flex items-center gap-1 text-[11px] text-amber-400 hover:text-amber-300 font-semibold px-2 py-1 rounded-lg bg-amber-500/10 border border-amber-500/20"
-													title="Разбить эти файлы на несколько постов"
-												>
-													<Layers3 className="h-3.5 w-3.5" />
-													<span>
-														Пакетная генерация
-													</span>
-												</button>
-											)}
-
-										<button
-											onClick={handleSelectFiles}
-											disabled={
-												attachedFiles.length >= 10
-											}
-											className="flex items-center gap-1 text-[11px] text-blue-400 hover:text-blue-300 font-medium disabled:opacity-40"
-										>
-											<ImagePlus className="h-3.5 w-3.5" />
-											<span>Добавить еще</span>
-										</button>
-									</div>
-								</div>
-
-								<div
-									className={`flex-1 overflow-y-auto grid gap-3 pr-1 select-none ${isRightPanelOpen ? "grid-cols-3" : "grid-cols-4"}`}
-								>
-									{attachedFiles.map((file, idx) => (
-										<div
-											key={idx}
-											className="group relative h-28 rounded-xl bg-slate-950 border border-slate-800 hover:border-slate-600 overflow-hidden shadow-md flex items-center justify-center transition-all"
-										>
-											{file.isImage && file.previewUrl ? (
-												<img
-													src={file.previewUrl}
-													alt={file.name}
-													onClick={() =>
-														file.previewUrl &&
-														setFullViewImage(
-															file.previewUrl,
-														)
-													}
-													className="h-full w-full object-cover cursor-pointer group-hover:scale-105 transition-transform duration-200"
-												/>
-											) : (
-												<div
-													onClick={() =>
-														file.previewUrl &&
-														setFullViewImage(
-															file.previewUrl,
-														)
-													}
-													className="flex flex-col items-center p-2 text-center cursor-pointer"
-												>
-													<FileText className="h-7 w-7 text-blue-400 mb-1" />
-													<span className="text-[10px] text-slate-400 truncate max-w-[90px]">
-														{file.name}
-													</span>
-												</div>
-											)}
-
-											<span className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-black/70 text-[10px] font-mono text-slate-300 font-bold backdrop-blur-sm">
-												#{idx + 1}
-											</span>
-
-											<div className="absolute inset-x-0 bottom-0 py-1 bg-slate-950/85 backdrop-blur-sm flex items-center justify-between px-1.5 border-t border-slate-800/80">
-												<button
-													disabled={idx === 0}
-													onClick={(e) => {
-														e.stopPropagation();
-														moveFile(idx, idx - 1);
-													}}
-													className="p-1 rounded hover:bg-slate-800 text-slate-300 disabled:opacity-20 disabled:hover:bg-transparent transition-colors"
-													title="Сдвинуть влево"
-												>
-													<ArrowLeft className="h-3 w-3" />
-												</button>
-
-												<span className="text-[9px] font-mono text-slate-400">
-													позиция
-												</span>
-
-												<button
-													disabled={
-														idx ===
-														attachedFiles.length - 1
-													}
-													onClick={(e) => {
-														e.stopPropagation();
-														moveFile(idx, idx + 1);
-													}}
-													className="p-1 rounded hover:bg-slate-800 text-slate-300 disabled:opacity-20 disabled:hover:bg-transparent transition-colors"
-													title="Сдвинуть вправо"
-												>
-													<ArrowRight className="h-3 w-3" />
-												</button>
-											</div>
-
-											<button
-												onClick={(e) => {
-													e.stopPropagation();
-													setAttachedFiles((prev) =>
-														prev.filter(
-															(_, i) => i !== idx,
-														),
-													);
-												}}
-												className="absolute top-1.5 right-1.5 p-1 rounded-full bg-black/70 hover:bg-rose-600 text-white shadow-lg backdrop-blur-sm transition-colors z-10"
-												title="Удалить"
-											>
-												<X className="h-3 w-3" />
-											</button>
-										</div>
-									))}
-								</div>
-							</div>
-						)}
-					</div>
-
-					<div className="mt-3 rounded-2xl bg-slate-900/90 border border-slate-800 overflow-hidden select-none">
-						<button
-							onClick={() => setIsSettingsOpen(!isSettingsOpen)}
-							className="w-full flex items-center justify-between p-3 text-xs font-semibold text-slate-300 hover:bg-slate-800/40 transition-colors"
-						>
-							<span>Настройки публикации</span>
-							{isSettingsOpen ? (
-								<ChevronUp className="h-4 w-4" />
-							) : (
-								<ChevronDown className="h-4 w-4" />
-							)}
-						</button>
-
-						{isSettingsOpen && (
-							<div className="p-3 pt-0 space-y-3.5 border-t border-slate-800/60">
-								<div className="flex items-center justify-between pt-2">
-									<div className="flex flex-col">
-										<span className="text-xs font-medium text-slate-200">
-											Стиль отображения медиа
-										</span>
-										<span className="text-[11px] text-slate-500">
-											Вид прикрепленных фото на стене VK
-										</span>
-									</div>
-									<div className="flex items-center bg-slate-800 border border-slate-700 rounded-lg p-0.5">
-										<button
-											onClick={() =>
-												setAttachmentsViewMode("grid")
-											}
-											className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition-colors ${
-												attachmentsViewMode === "grid"
-													? "bg-blue-600 text-white shadow-sm font-semibold"
-													: "text-slate-400 hover:text-slate-200"
-											}`}
-										>
-											<LayoutGrid className="h-3.5 w-3.5" />
-											<span>Сетка</span>
-										</button>
-										<button
-											onClick={() =>
-												setAttachmentsViewMode(
-													"carousel",
-												)
-											}
-											className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition-colors ${
-												attachmentsViewMode ===
-												"carousel"
-													? "bg-blue-600 text-white shadow-sm font-semibold"
-													: "text-slate-400 hover:text-slate-200"
-											}`}
-										>
-											<SlidersHorizontal className="h-3.5 w-3.5" />
-											<span>Карусель</span>
-										</button>
-									</div>
-								</div>
-
-								<div className="flex items-center justify-between">
-									<span className="text-xs font-medium text-slate-200">
-										Комментарии к записи
-									</span>
-									<label className="relative inline-flex items-center cursor-pointer">
-										<input
-											type="checkbox"
-											checked={commentsOnPost}
-											onChange={(e) =>
-												setCommentsOnPost(
-													e.target.checked,
-												)
-											}
-											className="sr-only peer"
-										/>
-										<div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-500 border border-slate-700"></div>
-									</label>
-								</div>
-
-								<div className="flex items-start justify-between">
-									<div className="flex flex-col pr-4">
-										<span className="text-xs font-medium text-slate-200">
-											Уведомление для подписчиков
-										</span>
-										<span className="text-[11px] text-slate-500">
-											Отправлять колокольчик тем, у кого
-											включены уведомления
-										</span>
-									</div>
-									<label className="relative inline-flex items-center cursor-pointer mt-0.5">
-										<input
-											type="checkbox"
-											checked={notifyFollowers}
-											onChange={(e) =>
-												setNotifyFollowers(
-													e.target.checked,
-												)
-											}
-											className="sr-only peer"
-										/>
-										<div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-500 border border-slate-700"></div>
-									</label>
-								</div>
-
-								<div className="flex items-start justify-between">
-									<div className="flex flex-col pr-4">
-										<span className="text-xs font-medium text-slate-200">
-											Подпись автора
-										</span>
-										<span className="text-[11px] text-slate-500">
-											«Автор: Имя Фамилия» будет указано
-											под постом
-										</span>
-									</div>
-									<label className="relative inline-flex items-center cursor-pointer mt-0.5">
-										<input
-											type="checkbox"
-											checked={authorsName}
-											onChange={(e) =>
-												setAuthorsName(e.target.checked)
-											}
-											className="sr-only peer"
-										/>
-										<div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-500 border border-slate-700"></div>
-									</label>
-								</div>
-
-								<div className="flex items-start justify-between">
-									<div className="flex flex-col pr-4">
-										<span className="text-xs font-medium text-slate-200">
-											Метка «Реклама от автора»
-										</span>
-										<span className="text-[11px] text-slate-500">
-											Не добавлена. Метку нельзя изменить
-											после публикации
-										</span>
-									</div>
-									<label className="relative inline-flex items-center cursor-pointer mt-0.5">
-										<input
-											type="checkbox"
-											checked={adFromCreator}
-											onChange={(e) =>
-												setAdFromCreator(
-													e.target.checked,
-												)
-											}
-											className="sr-only peer"
-										/>
-										<div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-500 border border-slate-700"></div>
-									</label>
-								</div>
-							</div>
-						)}
-					</div>
-
-					{!editingPostId && (
-						<div
-							className="mt-3 p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800 flex flex-col gap-3 text-xs select-none relative"
-							ref={calendarRef}
-						>
-							<div className="flex items-center justify-between">
-								<div className="flex items-center gap-2">
-									<Calendar className="h-4 w-4 text-blue-400" />
-									<span className="text-slate-200 font-medium">
-										Задать время слота вручную
-									</span>
-								</div>
-								<label className="relative inline-flex items-center cursor-pointer">
-									<input
-										type="checkbox"
-										checked={isManualTime}
-										onChange={(e) => {
-											setIsManualTime(e.target.checked);
-											if (!e.target.checked)
-												setIsCalendarOpen(false);
-										}}
-										className="sr-only peer"
-									/>
-									<div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-500 border border-slate-700"></div>
-								</label>
-							</div>
-
-							{isManualTime && (
-								<div className="pt-2.5 border-t border-slate-800 flex items-center justify-between gap-3">
-									<span className="text-[11px] text-slate-400">
-										Время публикации:
-									</span>
-									<button
-										onClick={() =>
-											setIsCalendarOpen(!isCalendarOpen)
-										}
-										className="flex items-center gap-2 bg-slate-800 hover:bg-slate-750 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-100 font-mono focus:outline-none focus:border-blue-500 transition-colors"
-									>
-										<Clock className="h-3.5 w-3.5 text-blue-400" />
-										<span>{getCustomDisplayString()}</span>
-									</button>
-								</div>
-							)}
-
-							{isCalendarOpen && isManualTime && (
-								<div className="absolute bottom-full left-0 mb-2 w-72 bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl p-3.5 z-50">
-									<div className="flex items-center justify-between mb-3 text-xs">
-										<span className="font-semibold capitalize text-slate-200">
-											{format(viewMonth, "LLLL yyyy", {
-												locale: ru,
-											})}
-										</span>
-										<div className="flex items-center gap-1">
-											<button
-												onClick={() =>
-													setViewMonth(
-														subMonths(viewMonth, 1),
-													)
-												}
-												className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-slate-200"
-											>
-												<ChevronLeft className="h-4 w-4" />
-											</button>
-											<button
-												onClick={() =>
-													setViewMonth(
-														addMonths(viewMonth, 1),
-													)
-												}
-												className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-slate-200"
-											>
-												<ChevronRight className="h-4 w-4" />
-											</button>
-										</div>
-									</div>
-
-									<div className="grid grid-cols-7 gap-1 text-center text-[10px] text-slate-500 font-medium mb-1">
-										<span>Пн</span>
-										<span>Вт</span>
-										<span>Ср</span>
-										<span>Чт</span>
-										<span>Пт</span>
-										<span className="text-amber-500/80">
-											Сб
-										</span>
-										<span className="text-amber-500/80">
-											Вс
-										</span>
-									</div>
-
-									<div className="grid grid-cols-7 gap-1 text-center text-xs">
-										{daysInCalendar.map((day, idx) => {
-											const isSelected = isSameDay(
-												day,
-												selectedDate,
-											);
-											const isCurrentMonth =
-												day.getMonth() ===
-												viewMonth.getMonth();
-											return (
-												<button
-													key={idx}
-													onClick={() =>
-														setSelectedDate(day)
-													}
-													className={`h-7 w-7 mx-auto rounded-lg flex items-center justify-center font-mono text-[11px] transition-colors ${
-														isSelected
-															? "bg-blue-600 text-white font-semibold shadow-md shadow-blue-600/30"
-															: isCurrentMonth
-																? "text-slate-200 hover:bg-slate-800"
-																: "text-slate-600 hover:bg-slate-800/40"
-													}`}
-												>
-													{format(day, "d")}
-												</button>
-											);
-										})}
-									</div>
-
-									<div className="mt-3 pt-3 border-t border-slate-800 flex items-center justify-between text-xs">
-										<span className="text-slate-400 text-[11px]">
-											Время (24h):
-										</span>
-										<div className="flex items-center gap-1 font-mono">
-											<select
-												value={pickerHours}
-												onChange={(e) =>
-													setPickerHours(
-														Number(e.target.value),
-													)
-												}
-												className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-blue-500 cursor-pointer"
-											>
-												{Array.from({ length: 24 }).map(
-													(_, i) => (
-														<option
-															key={i}
-															value={i}
-														>
-															{i
-																.toString()
-																.padStart(
-																	2,
-																	"0",
-																)}
-														</option>
-													),
-												)}
-											</select>
-											<span className="text-slate-500 font-bold">
-												:
-											</span>
-											<select
-												value={pickerMinutes}
-												onChange={(e) =>
-													setPickerMinutes(
-														Number(e.target.value),
-													)
-												}
-												className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-blue-500 cursor-pointer"
-											>
-												{Array.from({ length: 12 }).map(
-													(_, i) => {
-														const m = i * 5;
-														return (
-															<option
-																key={m}
-																value={m}
-															>
-																{m
-																	.toString()
-																	.padStart(
-																		2,
-																		"0",
-																	)}
-															</option>
-														);
-													},
-												)}
-											</select>
-										</div>
-									</div>
-
-									<div className="mt-3 flex justify-end">
-										<button
-											onClick={() =>
-												setIsCalendarOpen(false)
-											}
-											className="w-full py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold shadow-md"
-										>
-											Применить
-										</button>
-									</div>
-								</div>
-							)}
-						</div>
-					)}
-
-					<div className="mt-4 pt-3 border-t border-slate-800 flex items-center gap-3">
-						{editingPostId && (
-							<button
-								onClick={handleCancelEditing}
-								className="px-4 py-3.5 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-300 font-semibold text-sm transition-colors"
-							>
-								Отмена
-							</button>
-						)}
-
-						<button
-							onClick={handleSavePost}
-							disabled={!selectedTargetId}
-							className={`flex-1 flex items-center justify-center gap-2.5 rounded-xl py-3.5 text-sm font-semibold text-white shadow-lg transition-all active:scale-[0.99] disabled:opacity-50 disabled:pointer-events-none ${
-								editingPostId
-									? "bg-emerald-600 hover:bg-emerald-500 shadow-emerald-600/20"
-									: "bg-blue-600 hover:bg-blue-500 shadow-blue-600/20"
-							}`}
-						>
-							{editingPostId ? (
-								<>
-									<Save className="h-4 w-4" />
-									<span>
-										Сохранить изменения в посте #
-										{editingPostId}
-									</span>
-								</>
-							) : (
-								<>
-									<Plus className="h-4 w-4" />
-									<span>
-										{isManualTime
-											? `Добавить на выбранное время — ${getCustomDisplayString()}`
-											: `Добавить в очередь — ${nextSlotDisplay}`}
-									</span>
-								</>
-							)}
-						</button>
-					</div>
-				</section>
-
-				{/* Правая панель */}
-				<section
-					className={`flex flex-col p-6 overflow-hidden bg-slate-950/40 transition-all duration-300 ease-in-out ${
-						isRightPanelOpen
-							? "w-1/2 opacity-100 translate-x-0"
-							: "w-0 p-0 opacity-0 translate-x-12 pointer-events-none"
-					}`}
-				>
-					<div className="mb-4 flex items-center justify-between">
-						<div className="flex items-center bg-slate-900 border border-slate-800 rounded-xl p-1 gap-1">
-							<button
-								onClick={() => setActiveQueueTab("local")}
-								className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-									activeQueueTab === "local"
-										? "bg-blue-600 text-white shadow-md shadow-blue-600/25"
-										: "text-slate-400 hover:text-slate-200"
-								}`}
-							>
-								<Clock className="h-3.5 w-3.5" />
-								<span>Локальная ({localPosts.length})</span>
-							</button>
-
-							<button
-								onClick={() => setActiveQueueTab("vk")}
-								className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-									activeQueueTab === "vk"
-										? "bg-emerald-600 text-white shadow-md shadow-emerald-600/25"
-										: "text-slate-400 hover:text-slate-200"
-								}`}
-							>
-								<Cloud className="h-3.5 w-3.5" />
-								<span>
-									Отложка ВК ({vkDelayedPosts.length})
-								</span>
-							</button>
-
-							<button
-								onClick={() => {
-									setActiveQueueTab("history");
-									if (selectedTargetId)
-										loadHistory(selectedTargetId);
-								}}
-								className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-									activeQueueTab === "history"
-										? "bg-purple-600 text-white shadow-md shadow-purple-600/25"
-										: "text-slate-400 hover:text-slate-200"
-								}`}
-							>
-								<History className="h-3.5 w-3.5" />
-								<span>История ({historyPosts.length})</span>
-							</button>
-						</div>
-
-						<div className="flex items-center gap-2">
-							<div className="flex items-center bg-slate-900 border border-slate-800 rounded-xl p-0.5">
-								<button
-									onClick={() => setQueueViewMode("list")}
-									className={`p-1.5 rounded-lg text-xs transition-colors ${
-										queueViewMode === "list"
-											? "bg-slate-800 text-blue-400"
-											: "text-slate-400 hover:text-slate-200"
-									}`}
-									title="Вид списком"
-								>
-									<ListFilter className="h-4 w-4" />
-								</button>
-								<button
-									onClick={() => setQueueViewMode("calendar")}
-									className={`p-1.5 rounded-lg text-xs transition-colors ${
-										queueViewMode === "calendar"
-											? "bg-slate-800 text-blue-400"
-											: "text-slate-400 hover:text-slate-200"
-									}`}
-									title="Визуальный календарь контента"
-								>
-									<CalendarDays className="h-4 w-4" />
-								</button>
-							</div>
-
-							{activeQueueTab === "vk" &&
-								vkDelayedPosts.length > 0 && (
-									<button
-										onClick={handleCleanLocalFiles}
-										className="p-2 rounded-xl text-slate-400 hover:text-emerald-400 bg-slate-900 border border-slate-800 hover:border-slate-700 transition-colors"
-										title="Очистить с диска ПК оригиналы уже загруженных в ВК файлов"
-									>
-										<HardDriveDownload className="h-4 w-4" />
-									</button>
-								)}
-
-							<button
-								onClick={() =>
-									selectedTargetId &&
-									syncVkQueue(selectedTargetId)
-								}
-								disabled={isSyncingVk}
-								className="p-2 rounded-xl text-slate-400 hover:text-blue-400 bg-slate-900 border border-slate-800 hover:border-slate-700 transition-colors"
-								title="Синхронизировать с отложкой ВК"
-							>
-								<RefreshCw
-									className={`h-4 w-4 ${isSyncingVk ? "animate-spin text-blue-400" : ""}`}
-								/>
-							</button>
-
-							{activeQueueTab === "local" && (
-								<button
-									onClick={handleStartTransfer}
-									disabled={
-										isTransferring ||
-										localPosts.filter(
-											(p) =>
-												p.status === "queued" ||
-												p.status === "failed",
-										).length === 0
-									}
-									className="flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-500 disabled:opacity-40 disabled:pointer-events-none transition-all shadow-lg shadow-emerald-600/20"
-								>
-									{isTransferring ? (
-										<>
-											<RefreshCw className="h-4 w-4 animate-spin" />
-											<span>
-												{transferProgress ||
-													"Отправка..."}
-											</span>
-										</>
-									) : (
-										<>
-											<Send className="h-4 w-4" />
-											<span>Отправить в ВК</span>
-										</>
-									)}
-								</button>
-							)}
-						</div>
-					</div>
-
-					{queueViewMode === "calendar" ? (
-						<div className="flex-1 flex flex-col bg-slate-900/60 border border-slate-800 rounded-2xl p-4 overflow-hidden">
-							<div className="flex items-center justify-between mb-3 text-xs">
-								<span className="font-semibold text-slate-200 capitalize">
-									{format(contentCalendarMonth, "LLLL yyyy", {
-										locale: ru,
-									})}
-								</span>
-								<div className="flex items-center gap-1">
-									<button
-										onClick={() =>
-											setContentCalendarMonth(
-												subMonths(
-													contentCalendarMonth,
-													1,
-												),
-											)
-										}
-										className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-slate-200"
-									>
-										<ChevronLeft className="h-4 w-4" />
-									</button>
-									<button
-										onClick={() =>
-											setContentCalendarMonth(
-												addMonths(
-													contentCalendarMonth,
-													1,
-												),
-											)
-										}
-										className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-slate-200"
-									>
-										<ChevronRight className="h-4 w-4" />
-									</button>
-								</div>
-							</div>
-
-							<div className="grid grid-cols-7 gap-1.5 text-center text-[11px] text-slate-500 font-medium mb-1.5">
-								<span>Пн</span>
-								<span>Вт</span>
-								<span>Ср</span>
-								<span>Чт</span>
-								<span>Пт</span>
-								<span className="text-amber-500/80">Сб</span>
-								<span className="text-amber-500/80">Вс</span>
-							</div>
-
-							<div className="flex-1 grid grid-cols-7 gap-1.5 overflow-y-auto">
-								{contentDays.map((day, idx) => {
-									const dayPosts = displayedPosts.filter(
-										(p) =>
-											isSameDay(
-												new Date(p.scheduled_at_utc),
-												day,
-											),
-									);
-									const isCurrentMonth =
-										day.getMonth() ===
-										contentCalendarMonth.getMonth();
-
-									return (
-										<div
-											key={idx}
-											className={`min-h-[70px] rounded-xl border p-1.5 flex flex-col transition-colors ${
-												isCurrentMonth
-													? "bg-slate-950/70 border-slate-800/80"
-													: "bg-slate-950/20 border-slate-900 text-slate-600"
-											}`}
-										>
-											<span className="text-[10px] font-mono text-slate-400 font-semibold mb-1">
-												{format(day, "d")}
-											</span>
-
-											<div className="flex-1 space-y-1 overflow-y-auto">
-												{dayPosts.map((p) => (
-													<div
-														key={p.id}
-														onClick={() =>
-															toggleExpandPost(
-																p.id,
-															)
-														}
-														className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-[9px] font-mono text-blue-300 truncate cursor-pointer flex items-center gap-1 border border-slate-700"
-													>
-														<Clock className="h-2.5 w-2.5 flex-shrink-0" />
-														<span>
-															{format(
-																new Date(
-																	p.scheduled_at_utc,
-																),
-																"HH:mm",
-															)}
-														</span>
-														{p.attachments_count >
-															0 && (
-															<span className="text-slate-400">
-																(
-																{
-																	p.attachments_count
-																}
-																)
-															</span>
-														)}
-													</div>
-												))}
-											</div>
-										</div>
-									);
-								})}
-							</div>
-						</div>
-					) : (
-						<div className="flex-1 overflow-y-auto space-y-2.5 pr-1">
-							{displayedPosts.length === 0 ? (
-								<div className="flex flex-col items-center justify-center h-56 border border-dashed border-slate-800/80 rounded-2xl text-slate-500 text-xs">
-									<Clock className="h-8 w-8 text-slate-700 mb-2" />
-									<span className="font-medium text-slate-400">
-										{activeQueueTab === "local"
-											? "Локальная очередь пуста"
-											: activeQueueTab === "vk"
-												? "В отложке ВК нет постов"
-												: "История постов пуста"}
-									</span>
-									<span className="mt-1 text-slate-600">
-										{activeQueueTab === "local"
-											? "Созданные посты появятся здесь до отправки в ВК"
-											: activeQueueTab === "vk"
-												? "Синхронизируйте группу, чтобы увидеть отложенные посты на стене"
-												: "Все созданные посты сохраняются здесь"}
-									</span>
-								</div>
-							) : (
-								displayedPosts.map((post, index) => {
-									const isExpanded = expandedPostIds.includes(
-										post.id,
-									);
-									const isVkPost =
-										post.status === "transferred_to_vk";
-									const isHistoryTab =
-										activeQueueTab === "history";
-
-									return (
-										<div
-											key={post.id}
-											className="flex flex-col rounded-xl bg-slate-900/70 border border-slate-800/80 hover:border-slate-700 transition-colors overflow-hidden"
-										>
-											<div
-												onClick={() =>
-													toggleExpandPost(post.id)
-												}
-												className="flex items-start justify-between gap-4 p-4 cursor-pointer select-none"
-											>
-												<div className="flex-1 min-w-0">
-													<div className="flex items-center gap-2.5 text-xs mb-2">
-														<span className="text-[11px] font-mono text-slate-500">
-															#{index + 1}
-														</span>
-														<span className="font-semibold text-blue-400 font-mono">
-															{format(
-																new Date(
-																	post.scheduled_at_utc,
-																),
-																"dd/MM/yyyy HH:mm",
-															)}
-														</span>
-
-														{post.status ===
-															"queued" && (
-															<span className="rounded-md bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-400 border border-amber-500/20">
-																Локально
-															</span>
-														)}
-														{isVkPost && (
-															<span className="flex items-center gap-1 rounded-md bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-400 border border-emerald-500/20">
-																<CheckCircle2 className="h-3 w-3" />{" "}
-																В отложке ВК
-															</span>
-														)}
-														{post.status ===
-															"failed" && (
-															<span className="flex items-center gap-1 rounded-md bg-rose-500/10 px-2 py-0.5 text-[10px] font-semibold text-rose-400 border border-rose-500/20">
-																<AlertCircle className="h-3 w-3" />{" "}
-																Ошибка
-															</span>
-														)}
-														{post.status ===
-															"archived" && (
-															<span className="rounded-md bg-slate-800 px-2 py-0.5 text-[10px] font-semibold text-slate-400 border border-slate-700">
-																Архив / Завершён
-															</span>
-														)}
-
-														{post.attachments_count >
-															0 && (
-															<span className="text-slate-400 text-[11px]">
-																•{" "}
-																{
-																	post.attachments_count
-																}{" "}
-																влож. (
-																{post.attachments_view_mode ===
-																"carousel"
-																	? "карусель"
-																	: "сетка"}
-																)
-															</span>
-														)}
-													</div>
-
-													<p
-														className={`text-xs text-slate-200 leading-relaxed ${isExpanded ? "" : "line-clamp-2"}`}
-													>
-														{post.text || (
-															<span className="italic text-slate-500">
-																Без
-																сопроводительного
-																текста
-															</span>
-														)}
-													</p>
-												</div>
-
-												<div className="flex items-center gap-1">
-													{isHistoryTab ? (
-														<button
-															onClick={(e) => {
-																e.stopPropagation();
-																handleDeleteHistoryPost(
-																	post.id,
-																);
-															}}
-															className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition-all"
-															title="Удалить запись из истории"
-														>
-															<Trash2 className="h-4 w-4" />
-														</button>
-													) : isVkPost ? (
-														<button
-															onClick={(e) => {
-																e.stopPropagation();
-																handleDeleteVkPost(
-																	post.id,
-																);
-															}}
-															className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition-all"
-															title="Удалить пост из отложки ВК"
-														>
-															<Trash2 className="h-4 w-4" />
-														</button>
-													) : (
-														<button
-															onClick={(e) => {
-																e.stopPropagation();
-																handleDeleteLocalPost(
-																	post.id,
-																);
-															}}
-															className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition-all"
-															title="Удалить из локальной очереди"
-														>
-															<Trash2 className="h-4 w-4" />
-														</button>
-													)}
-
-													<div className="p-1 text-slate-500">
-														{isExpanded ? (
-															<ChevronUp className="h-4 w-4" />
-														) : (
-															<ChevronDown className="h-4 w-4" />
-														)}
-													</div>
-												</div>
-											</div>
-
-											{isExpanded && (
-												<div className="px-4 pb-4 pt-1 border-t border-slate-800/60 bg-slate-950/30">
-													{post.error_message && (
-														<div className="mb-3 p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-xs text-rose-400 leading-relaxed">
-															<strong>
-																Причина ошибки:
-															</strong>{" "}
-															{post.error_message}
-														</div>
-													)}
-
-													<div className="flex items-center gap-2 mb-3 p-2.5 rounded-xl bg-slate-900 border border-slate-800 flex-wrap">
-														<span className="text-xs text-slate-400 font-medium">
-															Действия:
-														</span>
-
-														{!isVkPost && (
-															<button
-																onClick={(
-																	e,
-																) => {
-																	e.stopPropagation();
-																	handleLoadPostToEditor(
-																		post,
-																	);
-																}}
-																className="px-3 py-1.5 rounded-lg bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/30 text-xs font-semibold flex items-center gap-1.5 transition-colors"
-																title="Загрузить пост в левый блок для редактирования"
-															>
-																<Edit3 className="h-3.5 w-3.5" />
-																<span>
-																	В редактор
-																</span>
-															</button>
-														)}
-
-														{isVkPost && (
-															<button
-																onClick={(
-																	e,
-																) => {
-																	e.stopPropagation();
-																	setRevertModalPost(
-																		post,
-																	);
-																}}
-																className="px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 text-xs font-semibold flex items-center gap-1.5 transition-colors"
-																title="Отозвать пост из ВК обратно в локальную очередь"
-															>
-																<Undo2 className="h-3.5 w-3.5" />
-																<span>
-																	Вернуть в
-																	локальную
-																	очередь
-																</span>
-															</button>
-														)}
-
-														{activeQueueTab ===
-															"local" && (
-															<>
-																<button
-																	onClick={(
-																		e,
-																	) => {
-																		e.stopPropagation();
-																		handleRescheduleNextSlot(
-																			post.id,
-																		);
-																	}}
-																	className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-750 text-slate-200 border border-slate-700 text-xs font-medium flex items-center gap-1.5 transition-colors"
-																	title="Занять следующий доступный слот по расписанию"
-																>
-																	<RotateCcw className="h-3.5 w-3.5" />
-																	<span>
-																		Следующий
-																		слот
-																	</span>
-																</button>
-																<button
-																	onClick={(
-																		e,
-																	) => {
-																		e.stopPropagation();
-																		openRescheduleModal(
-																			post,
-																		);
-																	}}
-																	className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-750 text-slate-200 border border-slate-700 text-xs font-medium flex items-center gap-1.5 transition-colors"
-																	title="Выбрать точную дату и время вручную"
-																>
-																	<Calendar className="h-3.5 w-3.5 text-blue-400" />
-																	<span>
-																		Задать
-																		время
-																	</span>
-																</button>
-															</>
-														)}
-													</div>
-
-													{post.attachments &&
-													post.attachments.length >
-														0 ? (
-														<div>
-															<span className="text-[11px] font-semibold text-slate-400 block mb-2">
-																Прикрепленные
-																вложения:
-															</span>
-															<div className="grid grid-cols-4 gap-2">
-																{post.attachments.map(
-																	(
-																		att,
-																		attIdx,
-																	) => (
-																		<div
-																			key={
-																				attIdx
-																			}
-																			onClick={() =>
-																				att.thumb_data &&
-																				setFullViewImage(
-																					att.thumb_data,
-																				)
-																			}
-																			className={`h-20 rounded-lg bg-slate-900 border border-slate-800 flex flex-col items-center justify-center overflow-hidden p-1 relative ${
-																				att.thumb_data
-																					? "cursor-pointer hover:border-slate-600"
-																					: ""
-																			}`}
-																		>
-																			{att.thumb_data ? (
-																				<img
-																					src={
-																						att.thumb_data
-																					}
-																					alt={
-																						att.file_name
-																					}
-																					className="h-full w-full object-cover rounded"
-																				/>
-																			) : (
-																				<div className="flex flex-col items-center p-1 text-center">
-																					<FileText className="h-5 w-5 text-blue-400 mb-1" />
-																					<span className="text-[9px] text-slate-400 truncate max-w-full">
-																						{
-																							att.file_name
-																						}
-																					</span>
-																				</div>
-																			)}
-																		</div>
-																	),
-																)}
-															</div>
-														</div>
-													) : (
-														<span className="text-[11px] text-slate-500 italic">
-															Вложений нет
-														</span>
-													)}
-												</div>
-											)}
-										</div>
-									);
-								})
-							)}
-						</div>
-					)}
-				</section>
+				<QueuePanel
+					isRightPanelOpen={isRightPanelOpen}
+					activeQueueTab={activeQueueTab}
+					queueViewMode={queueViewMode}
+					localPosts={localPosts}
+					vkDelayedPosts={vkDelayedPosts}
+					historyPosts={historyPosts}
+					displayedPosts={displayedPosts}
+					expandedPostIds={expandedPostIds}
+					contentCalendarMonth={contentCalendarMonth}
+					isSyncingVk={isSyncingVk}
+					isTransferring={isTransferring}
+					transferProgress={transferProgress}
+					onSetTab={setActiveQueueTab}
+					onSetViewMode={setQueueViewMode}
+					onSetContentMonth={setContentCalendarMonth}
+					onCleanLocalFiles={async () => {
+						if (
+							!selectedTargetId ||
+							!confirm(
+								"Удалить с диска оригиналы картинок, которые уже в ВК?",
+							)
+						)
+							return;
+						const count =
+							await api.cleanLocalFiles(selectedTargetId);
+						alert(`Очищено файлов: ${count}`);
+						syncVkQueue(selectedTargetId);
+					}}
+					onSyncVk={() =>
+						selectedTargetId && syncVkQueue(selectedTargetId)
+					}
+					onStartTransfer={async () => {
+						if (!selectedTargetId) return;
+						setIsTransferring(true);
+						setTransferProgress("Отправка в VK...");
+						await api.startTransfer(selectedTargetId).catch((e) => {
+							alert(e);
+							setIsTransferring(false);
+						});
+					}}
+					onToggleExpand={(id) =>
+						setExpandedPostIds((prev) =>
+							prev.includes(id)
+								? prev.filter((p) => p !== id)
+								: [...prev, id],
+						)
+					}
+					onLoadToEditor={(post) => {
+						setEditingPostId(post.id);
+						setPostText(post.text);
+						setAuthorsName(post.signed);
+						setCommentsOnPost(!post.close_comments);
+						setNotifyFollowers(!post.mute_notifications);
+						setAdFromCreator(post.mark_as_ads);
+						setAttachmentsViewMode(
+							post.attachments_view_mode === "carousel"
+								? "carousel"
+								: "grid",
+						);
+						setAttachedFiles(
+							post.attachments.map((a) => ({
+								path: a.local_path || "",
+								name: a.file_name,
+								isImage: true,
+								previewUrl: a.thumb_data,
+							})),
+						);
+						setIsRightPanelOpen(true);
+					}}
+					onOpenRevertModal={setRevertModalPost}
+					onRescheduleNextSlot={async (id) => {
+						if (!selectedPatternId) return;
+						await api.rescheduleNextSlot(id, selectedPatternId);
+						if (selectedTargetId) syncVkQueue(selectedTargetId);
+					}}
+					onOpenRescheduleModal={(post) => {
+						const d = new Date(post.scheduled_at_utc);
+						setRescheduleModalPost(post);
+						setRescheduleDate(d);
+						setRescheduleHours(d.getHours());
+						setRescheduleMinutes(d.getMinutes());
+						setRescheduleViewMonth(d);
+					}}
+					onDeleteLocalPost={async (id) => {
+						await api.deleteLocalPost(id);
+						if (selectedTargetId) syncVkQueue(selectedTargetId);
+					}}
+					onDeleteVkPost={async (id) => {
+						if (!confirm("Удалить отложенный пост со стены ВК?"))
+							return;
+						await api.deleteVkPost(id);
+						if (selectedTargetId) syncVkQueue(selectedTargetId);
+					}}
+					onDeleteHistoryPost={async (id) => {
+						if (!confirm("Удалить запись из истории?")) return;
+						await api.deleteHistoryPost(id);
+						if (selectedTargetId) loadHistory(selectedTargetId);
+					}}
+					onOpenFullImage={setFullViewImage}
+				/>
 			</main>
 
-			{/* Модальное окно пакетной генерации постов */}
-			{showBatchModal && (
-				<div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-150">
-					<div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md p-6 shadow-2xl">
-						<div className="flex items-center justify-between mb-4">
-							<div className="flex items-center gap-2 text-amber-400">
-								<Layers3 className="h-5 w-5" />
-								<h3 className="font-semibold text-sm text-slate-100">
-									Пакетная генерация очереди
-								</h3>
-							</div>
-							<button
-								onClick={() => setShowBatchModal(false)}
-								className="text-slate-400 hover:text-slate-200"
-							>
-								<X className="h-5 w-5" />
-							</button>
-						</div>
+			<TokenModal
+				show={showTokenModal}
+				tokenInput={newTokenInput}
+				isAdding={isAddingToken}
+				onClose={() => setShowTokenModal(false)}
+				onInputChange={setNewTokenInput}
+				onOpenBrowser={api.openBrowserAuth}
+				onPaste={async () => {
+					const t = await navigator.clipboard
+						.readText()
+						.catch(() => "");
+					setNewTokenInput(t);
+				}}
+				onSubmit={async () => {
+					if (!newTokenInput.trim()) return;
+					setIsAddingToken(true);
+					try {
+						const acc = await api.addToken(newTokenInput);
+						setNewTokenInput("");
+						setShowTokenModal(false);
+						await loadAccounts();
+						setActiveAccountId(acc.id);
+						await loadTargetsForAccount(acc.id);
+					} catch (e) {
+						alert("Ошибка добавления: " + e);
+					} finally {
+						setIsAddingToken(false);
+					}
+				}}
+				onCleanExpired={handleCleanExpiredTokens}
+			/>
 
-						<p className="text-xs text-slate-300 mb-4 leading-relaxed">
-							Вы выбрали <strong>{attachedFiles.length}</strong>{" "}
-							изображений. Выберите, как распределить их по слотам
-							расписания:
-						</p>
+			<PatternModal
+				show={showPatternModal}
+				name={newPatternName}
+				times={newPatternTimes}
+				intervalDays={newPatternIntervalDays}
+				onClose={() => setShowPatternModal(false)}
+				onNameChange={setNewPatternName}
+				onTimesChange={setNewPatternTimes}
+				onIntervalChange={setNewPatternIntervalDays}
+				onSubmit={async () => {
+					if (!newPatternName.trim()) return alert("Укажите имя");
+					const times = newPatternTimes
+						.split(",")
+						.map((s) => s.trim())
+						.filter((s) =>
+							/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/.test(s),
+						);
+					if (times.length === 0) return alert("Укажите время ЧЧ:ММ");
+					const created = await api.createPattern(
+						newPatternName,
+						times,
+						Intl.DateTimeFormat().resolvedOptions().timeZone,
+						newPatternIntervalDays,
+					);
+					setPatterns((prev) => [...prev, created]);
+					setSelectedPatternId(created.id);
+					setShowPatternModal(false);
+					setNewPatternName("");
+				}}
+			/>
 
-						<div className="space-y-2 mb-5">
-							{[
-								{
-									size: 1,
-									label: `По 1 фото на пост (${attachedFiles.length} постов)`,
-								},
-								{
-									size: 2,
-									label: `По 2 фото на пост (${Math.ceil(attachedFiles.length / 2)} постов)`,
-								},
-								{
-									size: 4,
-									label: `По 4 фото на пост (${Math.ceil(attachedFiles.length / 4)} постов)`,
-								},
-							].map((opt) => (
-								<button
-									key={opt.size}
-									onClick={() => setBatchChunkSize(opt.size)}
-									className={`w-full flex items-center justify-between p-3 rounded-xl border text-xs font-semibold transition-all ${
-										batchChunkSize === opt.size
-											? "bg-amber-500/20 border-amber-500/40 text-amber-300"
-											: "bg-slate-800 border-slate-700 text-slate-200 hover:bg-slate-750"
-									}`}
-								>
-									<span>{opt.label}</span>
-									{batchChunkSize === opt.size && (
-										<CheckCircle2 className="h-4 w-4 text-amber-400" />
-									)}
-								</button>
-							))}
-						</div>
+			<BatchModal
+				show={showBatchModal}
+				totalFiles={attachedFiles.length}
+				chunkSize={batchChunkSize}
+				isCreating={isBatchCreating}
+				onClose={() => setShowBatchModal(false)}
+				onSetChunkSize={setBatchChunkSize}
+				onSubmit={async () => {
+					if (!selectedTargetId || !selectedPatternId) return;
+					setIsBatchCreating(true);
+					try {
+						const count = await api.batchCreate({
+							targetId: selectedTargetId,
+							patternId: selectedPatternId,
+							filePaths: attachedFiles.map((f) => f.path),
+							itemsPerPost: batchChunkSize,
+							text: postText.trim(),
+							signed: authorsName,
+							closeComments: !commentsOnPost,
+							muteNotifications: !notifyFollowers,
+							markAsAds: adFromCreator,
+							attachmentsViewMode,
+						});
+						setShowBatchModal(false);
+						setPostText("");
+						setAttachedFiles([]);
+						syncVkQueue(selectedTargetId);
+						alert(`Создано постов: ${count}`);
+					} finally {
+						setIsBatchCreating(false);
+					}
+				}}
+			/>
 
-						<div className="flex justify-end gap-2.5">
-							<button
-								onClick={() => setShowBatchModal(false)}
-								className="px-4 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-slate-200"
-							>
-								Отмена
-							</button>
-							<button
-								onClick={handleBatchCreate}
-								disabled={isBatchCreating}
-								className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-semibold shadow-md transition-colors"
-							>
-								{isBatchCreating
-									? "Создание..."
-									: "Сформировать очередь"}
-							</button>
-						</div>
-					</div>
-				</div>
-			)}
+			<RevertModal
+				post={revertModalPost}
+				onClose={() => setRevertModalPost(null)}
+				onRevertSameTime={async (id) => {
+					await api.revertSameTime(id);
+					setRevertModalPost(null);
+					if (selectedTargetId) syncVkQueue(selectedTargetId);
+					setActiveQueueTab("local");
+				}}
+				onRevertNextSlot={async (id) => {
+					if (!selectedPatternId) return;
+					await api.revertNextSlot(id, selectedPatternId);
+					setRevertModalPost(null);
+					if (selectedTargetId) syncVkQueue(selectedTargetId);
+					setActiveQueueTab("local");
+				}}
+			/>
 
-			{/* Модальное окно возврата поста из ВК в локальную очередь */}
-			{revertModalPost && (
-				<div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-150">
-					<div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md p-6 shadow-2xl">
-						<div className="flex items-center justify-between mb-4">
-							<div className="flex items-center gap-2 text-amber-400">
-								<Undo2 className="h-5 w-5" />
-								<h3 className="font-semibold text-sm text-slate-100">
-									Вернуть пост в локальную очередь
-								</h3>
-							</div>
-							<button
-								onClick={() => setRevertModalPost(null)}
-								className="text-slate-400 hover:text-slate-200"
-							>
-								<X className="h-5 w-5" />
-							</button>
-						</div>
+			<RescheduleModal
+				post={rescheduleModalPost}
+				date={rescheduleDate}
+				hours={rescheduleHours}
+				minutes={rescheduleMinutes}
+				viewMonth={rescheduleViewMonth}
+				onClose={() => setRescheduleModalPost(null)}
+				onViewMonthChange={setRescheduleViewMonth}
+				onDateSelect={setRescheduleDate}
+				onHoursChange={setRescheduleHours}
+				onMinutesChange={setRescheduleMinutes}
+				onSubmit={async () => {
+					if (!rescheduleModalPost) return;
+					const targetDate = new Date(rescheduleDate);
+					targetDate.setHours(
+						rescheduleHours,
+						rescheduleMinutes,
+						0,
+						0,
+					);
+					await api.rescheduleCustom(
+						rescheduleModalPost.id,
+						targetDate.toISOString(),
+					);
+					setRescheduleModalPost(null);
+					if (selectedTargetId) syncVkQueue(selectedTargetId);
+				}}
+			/>
 
-						<p className="text-xs text-slate-300 mb-5 leading-relaxed">
-							Пост будет удален со стены ВКонтакте и вернется в
-							список локальной очереди. Выберите время публикации:
-						</p>
-
-						<div className="space-y-2.5">
-							<button
-								onClick={() =>
-									handleRevertSameTime(revertModalPost.id)
-								}
-								className="w-full flex items-center justify-between p-3 rounded-xl bg-slate-800 hover:bg-slate-750 border border-slate-700 text-xs font-semibold text-slate-100 transition-colors text-left"
-							>
-								<span>Вернуть на то же время</span>
-								<span className="font-mono text-[11px] text-blue-400">
-									{format(
-										new Date(
-											revertModalPost.scheduled_at_utc,
-										),
-										"dd/MM/yyyy HH:mm",
-									)}
-								</span>
-							</button>
-
-							<button
-								onClick={() =>
-									handleRevertNextSlot(revertModalPost.id)
-								}
-								className="w-full flex items-center justify-between p-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-xs font-semibold text-white transition-colors shadow-md shadow-blue-600/20 text-left"
-							>
-								<span>Добавить в очередь (по паттерну)</span>
-								<span className="text-[11px] opacity-80">
-									в конец очереди
-								</span>
-							</button>
-						</div>
-
-						<div className="mt-5 flex justify-end">
-							<button
-								onClick={() => setRevertModalPost(null)}
-								className="px-4 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-slate-200"
-							>
-								Отмена
-							</button>
-						</div>
-					</div>
-				</div>
-			)}
-
-			{/* Модальное окно изменения времени поста в очереди */}
-			{rescheduleModalPost && (
-				<div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-150">
-					<div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-sm p-5 shadow-2xl">
-						<div className="flex items-center justify-between mb-4">
-							<div className="flex items-center gap-2 text-blue-400">
-								<Calendar className="h-5 w-5" />
-								<h3 className="font-semibold text-sm text-slate-100">
-									Выбор времени публикации
-								</h3>
-							</div>
-							<button
-								onClick={() => setRescheduleModalPost(null)}
-								className="text-slate-400 hover:text-slate-200"
-							>
-								<X className="h-5 w-5" />
-							</button>
-						</div>
-
-						<div className="flex items-center justify-between mb-3 text-xs">
-							<span className="font-semibold capitalize text-slate-200">
-								{format(rescheduleViewMonth, "LLLL yyyy", {
-									locale: ru,
-								})}
-							</span>
-							<div className="flex items-center gap-1">
-								<button
-									onClick={() =>
-										setRescheduleViewMonth(
-											subMonths(rescheduleViewMonth, 1),
-										)
-									}
-									className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-slate-200"
-								>
-									<ChevronLeft className="h-4 w-4" />
-								</button>
-								<button
-									onClick={() =>
-										setRescheduleViewMonth(
-											addMonths(rescheduleViewMonth, 1),
-										)
-									}
-									className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-slate-200"
-								>
-									<ChevronRight className="h-4 w-4" />
-								</button>
-							</div>
-						</div>
-
-						<div className="grid grid-cols-7 gap-1 text-center text-[10px] text-slate-500 font-medium mb-1">
-							<span>Пн</span>
-							<span>Вт</span>
-							<span>Ср</span>
-							<span>Чт</span>
-							<span>Пт</span>
-							<span className="text-amber-500/80">Сб</span>
-							<span className="text-amber-500/80">Вс</span>
-						</div>
-
-						<div className="grid grid-cols-7 gap-1 text-center text-xs">
-							{resDaysInCalendar.map((day, idx) => {
-								const isSelected = isSameDay(
-									day,
-									rescheduleDate,
-								);
-								const isCurrentMonth =
-									day.getMonth() ===
-									rescheduleViewMonth.getMonth();
-								return (
-									<button
-										key={idx}
-										onClick={() => setRescheduleDate(day)}
-										className={`h-7 w-7 mx-auto rounded-lg flex items-center justify-center font-mono text-[11px] transition-colors ${
-											isSelected
-												? "bg-blue-600 text-white font-semibold shadow-md shadow-blue-600/30"
-												: isCurrentMonth
-													? "text-slate-200 hover:bg-slate-800"
-													: "text-slate-600 hover:bg-slate-800/40"
-										}`}
-									>
-										{format(day, "d")}
-									</button>
-								);
-							})}
-						</div>
-
-						<div className="mt-4 pt-3 border-t border-slate-800 flex items-center justify-between text-xs">
-							<span className="text-slate-400 text-[11px]">
-								Время (24h):
-							</span>
-							<div className="flex items-center gap-1 font-mono">
-								<select
-									value={rescheduleHours}
-									onChange={(e) =>
-										setRescheduleHours(
-											Number(e.target.value),
-										)
-									}
-									className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-blue-500 cursor-pointer"
-								>
-									{Array.from({ length: 24 }).map((_, i) => (
-										<option key={i} value={i}>
-											{i.toString().padStart(2, "0")}
-										</option>
-									))}
-								</select>
-								<span className="text-slate-500 font-bold">
-									:
-								</span>
-								<select
-									value={rescheduleMinutes}
-									onChange={(e) =>
-										setRescheduleMinutes(
-											Number(e.target.value),
-										)
-									}
-									className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-blue-500 cursor-pointer"
-								>
-									{Array.from({ length: 12 }).map((_, i) => {
-										const m = i * 5;
-										return (
-											<option key={m} value={m}>
-												{m.toString().padStart(2, "0")}
-											</option>
-										);
-									})}
-								</select>
-							</div>
-						</div>
-
-						<div className="mt-5 flex justify-end gap-2.5">
-							<button
-								onClick={() => setRescheduleModalPost(null)}
-								className="px-4 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-slate-200"
-							>
-								Отмена
-							</button>
-							<button
-								onClick={confirmRescheduleCustom}
-								className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold shadow-md"
-							>
-								Сохранить время
-							</button>
-						</div>
-					</div>
-				</div>
-			)}
-
-			{/* Модальное окно полноразмерного просмотра изображения */}
-			{fullViewImage && (
-				<div
-					onClick={() => setFullViewImage(null)}
-					className="fixed inset-0 bg-black/90 backdrop-blur-md flex items-center justify-center p-6 z-50 cursor-zoom-out animate-in fade-in duration-150"
-				>
-					<div className="relative max-w-5xl max-h-[90vh] flex items-center justify-center">
-						<img
-							src={fullViewImage}
-							alt="Полный размер"
-							className="max-w-full max-h-[90vh] object-contain rounded-xl shadow-2xl"
-						/>
-						<button
-							onClick={() => setFullViewImage(null)}
-							className="absolute -top-4 -right-4 p-2 rounded-full bg-slate-800 text-white hover:bg-rose-600 transition-colors shadow-lg"
-							title="Закрыть"
-						>
-							<X className="h-5 w-5" />
-						</button>
-					</div>
-				</div>
-			)}
-
-			{/* Модальное окно входа / добавления токена */}
-			{showTokenModal && (
-				<div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-					<div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md p-6 shadow-2xl">
-						<div className="flex items-center justify-between mb-4">
-							<div className="flex items-center gap-2 text-blue-400">
-								<Key className="h-5 w-5" />
-								<h3 className="font-semibold text-base text-slate-100">
-									Вход ВКонтакте
-								</h3>
-							</div>
-							<button
-								onClick={() => setShowTokenModal(false)}
-								className="text-slate-400 hover:text-slate-200"
-							>
-								<X className="h-5 w-5" />
-							</button>
-						</div>
-
-						<div className="space-y-4">
-							<div className="p-3.5 bg-blue-600/10 border border-blue-500/30 rounded-xl text-xs text-blue-300 leading-relaxed">
-								1. Нажмите синюю кнопку ниже, чтобы открыть
-								страницу ВК в браузере.
-								<br />
-								2. Нажмите <strong>«Разрешить»</strong> и
-								скопируйте ссылку из адресной строки.
-								<br />
-								3. Вставьте ссылку в поле ниже (токен извлечётся
-								сам) и нажмите <strong>«Подтвердить»</strong>.
-							</div>
-
-							<div className="flex gap-2">
-								<button
-									onClick={handleOpenBrowserForLogin}
-									className="flex-1 flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2.5 rounded-xl shadow-md transition-all text-xs"
-								>
-									<ExternalLink className="h-3.5 w-3.5" />
-									<span>Открыть окно входа в браузере</span>
-								</button>
-
-								<button
-									onClick={handlePasteFromClipboard}
-									className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-750 text-slate-200 border border-slate-700 px-3 py-2.5 rounded-xl text-xs font-medium transition-colors"
-									title="Вставить из буфера обмена"
-								>
-									<ClipboardCheck className="h-4 w-4 text-emerald-400" />
-									<span>Вставить</span>
-								</button>
-							</div>
-
-							<div>
-								<label className="block text-[11px] font-medium text-slate-400 mb-1.5">
-									Токен или скопированная ссылка из адресной
-									строки:
-								</label>
-								<textarea
-									rows={2}
-									placeholder="Вставьте ссылку или токен..."
-									className="w-full rounded-xl bg-slate-800 p-3 text-xs border border-slate-700 focus:outline-none focus:border-blue-500 font-mono resize-none leading-relaxed"
-									value={newTokenInput}
-									onChange={(e) =>
-										setNewTokenInput(
-											cleanTokenInput(e.target.value),
-										)
-									}
-								/>
-							</div>
-						</div>
-
-						<div className="mt-6 flex justify-end gap-3">
-							<button
-								onClick={() => setShowTokenModal(false)}
-								className="px-4 py-2 text-xs font-medium text-slate-400 hover:text-slate-200"
-							>
-								Отмена
-							</button>
-							<button
-								onClick={handleAddToken}
-								disabled={
-									isAddingToken || !newTokenInput.trim()
-								}
-								className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold disabled:opacity-50 transition-colors shadow-md"
-							>
-								{isAddingToken ? "Проверка..." : "Подтвердить"}
-							</button>
-						</div>
-					</div>
-				</div>
-			)}
-
-			{/* Модальное окно создания паттерна с интервалом в днях */}
-			{showPatternModal && (
-				<div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-					<div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md p-6 shadow-2xl">
-						<div className="flex items-center justify-between mb-4">
-							<h3 className="font-semibold text-base">
-								Создание своего паттерна
-							</h3>
-							<button
-								onClick={() => setShowPatternModal(false)}
-								className="text-slate-400 hover:text-slate-200"
-							>
-								<X className="h-5 w-5" />
-							</button>
-						</div>
-
-						<div className="space-y-4">
-							<div>
-								<label className="block text-xs font-medium text-slate-400 mb-1.5">
-									Название паттерна
-								</label>
-								<input
-									type="text"
-									placeholder="Например: 1 пост раз в 3 дня"
-									className="w-full rounded-xl bg-slate-800 px-3.5 py-2 text-sm border border-slate-700 focus:outline-none focus:border-blue-500"
-									value={newPatternName}
-									onChange={(e) =>
-										setNewPatternName(e.target.value)
-									}
-								/>
-							</div>
-
-							<div>
-								<label className="block text-xs font-medium text-slate-400 mb-1.5">
-									Времена публикаций через запятую (ЧЧ:ММ)
-								</label>
-								<input
-									type="text"
-									placeholder="14:00, 18:00, 21:00"
-									className="w-full rounded-xl bg-slate-800 px-3.5 py-2 text-sm border border-slate-700 focus:outline-none focus:border-blue-500 font-mono"
-									value={newPatternTimes}
-									onChange={(e) =>
-										setNewPatternTimes(e.target.value)
-									}
-								/>
-							</div>
-
-							<div>
-								<label className="block text-xs font-medium text-slate-400 mb-1.5">
-									Интервал в днях (1 = каждый день, 2 = через
-									день, 3 = раз в 3 дня)
-								</label>
-								<input
-									type="number"
-									min={1}
-									max={30}
-									className="w-full rounded-xl bg-slate-800 px-3.5 py-2 text-sm border border-slate-700 focus:outline-none focus:border-blue-500 font-mono"
-									value={newPatternIntervalDays}
-									onChange={(e) =>
-										setNewPatternIntervalDays(
-											Math.max(1, Number(e.target.value)),
-										)
-									}
-								/>
-								<p className="text-[11px] text-slate-500 mt-1">
-									Следующий пост будет запланирован через
-									указанное количество дней.
-								</p>
-							</div>
-						</div>
-
-						<div className="mt-6 flex justify-end gap-3">
-							<button
-								onClick={() => setShowPatternModal(false)}
-								className="px-4 py-2 text-xs font-medium text-slate-400 hover:text-slate-200"
-							>
-								Отмена
-							</button>
-							<button
-								onClick={handleCreatePattern}
-								className="px-4 py-2 bg-blue-600 rounded-xl text-xs font-semibold text-white hover:bg-blue-500"
-							>
-								Сохранить паттерн
-							</button>
-						</div>
-					</div>
-				</div>
-			)}
+			<LightboxModal
+				url={fullViewImage}
+				onClose={() => setFullViewImage(null)}
+			/>
 		</div>
 	);
 }
