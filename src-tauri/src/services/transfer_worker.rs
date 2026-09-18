@@ -8,6 +8,16 @@ use tauri::{AppHandle, Emitter};
 
 pub struct TransferWorker;
 
+fn format_vk_error(e_str: &str) -> String {
+    if e_str.contains("error 5") || e_str.contains("User authorization failed") || e_str.contains("another ip address") {
+        "Требуется обновление токена: срок действия истёк или не совпадает IP-адрес/VPN (VK API error 5). Нажмите кнопку ⟳ рядом с аккаунтом в шапке.".to_string()
+    } else if e_str.contains("error 27") || e_str.contains("Group authorization failed") {
+        "VK API error 27: Требуется токен пользователя-администратора (User Token), а не токен сообщества.".to_string()
+    } else {
+        format!("Ошибка: {}", e_str)
+    }
+}
+
 impl TransferWorker {
     pub async fn run_transfer(
         app: AppHandle,
@@ -142,17 +152,17 @@ impl TransferWorker {
                             vk_attachment_strings.push(vk_string);
                         }
                         Err(e) => {
-                            let e_str = e.to_string();
-                            let err_msg = format!("Ошибка загрузки: {}", e_str);
+                            let raw_err = e.to_string();
+                            let formatted = format_vk_error(&raw_err);
 
                             sqlx::query("UPDATE attachments SET upload_status = 'error', error_message = ? WHERE id = ?")
-                                .bind(&err_msg)
+                                .bind(&formatted)
                                 .bind(att_id)
                                 .execute(db)
                                 .await?;
 
                             sqlx::query("UPDATE posts SET status = 'failed', error_message = ? WHERE id = ?")
-                                .bind(&err_msg)
+                                .bind(&formatted)
                                 .bind(post_id)
                                 .execute(db)
                                 .await?;
@@ -195,8 +205,11 @@ impl TransferWorker {
                     .await?;
                 }
                 Err(e) => {
+                    let raw_err = e.to_string();
+                    let formatted = format_vk_error(&raw_err);
+
                     sqlx::query("UPDATE posts SET status = 'failed', error_message = ? WHERE id = ?")
-                        .bind(e.to_string())
+                        .bind(&formatted)
                         .bind(post_id)
                         .execute(db)
                         .await?;
@@ -204,7 +217,7 @@ impl TransferWorker {
             }
 
             if idx + 1 < total {
-                let jitter = (rand::random::<u64>() % 4) + 2;
+                let jitter = (rand::random::<u64>() % 3) + 2;
                 tokio::time::sleep(Duration::from_secs(jitter)).await;
             }
         }

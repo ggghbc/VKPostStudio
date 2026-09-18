@@ -35,6 +35,12 @@ import {
 	PanelRightClose,
 	PanelRightOpen,
 	Undo2,
+	Edit3,
+	HardDriveDownload,
+	CalendarDays,
+	ListFilter,
+	Layers3,
+	Save,
 } from "lucide-react";
 import {
 	format,
@@ -68,6 +74,7 @@ interface Pattern {
 	name: string;
 	timezone: string;
 	times_json: string;
+	interval_days: number;
 }
 
 interface AttachmentItem {
@@ -87,6 +94,10 @@ interface PostItem {
 	error_message?: string;
 	attachments_count: number;
 	attachments_view_mode: string;
+	signed: boolean;
+	close_comments: boolean;
+	mute_notifications: boolean;
+	mark_as_ads: boolean;
 	attachments: AttachmentItem[];
 }
 
@@ -131,10 +142,16 @@ export default function App() {
 	const [activeQueueTab, setActiveQueueTab] = useState<
 		"local" | "vk" | "history"
 	>("local");
+	const [queueViewMode, setQueueViewMode] = useState<"list" | "calendar">(
+		"list",
+	);
 	const [expandedPostIds, setExpandedPostIds] = useState<number[]>([]);
 	const [nextSlotDisplay, setNextSlotDisplay] = useState<string>("Расчет...");
 	const [isSyncingVk, setIsSyncingVk] = useState(false);
 	const [isGroupTokenAuth, setIsGroupTokenAuth] = useState(false);
+
+	// Режим редактирования существующего поста
+	const [editingPostId, setEditingPostId] = useState<number | null>(null);
 
 	// Сворачивание правой панели
 	const [isRightPanelOpen, setIsRightPanelOpen] = useState(true);
@@ -144,12 +161,12 @@ export default function App() {
 	const [attachedFiles, setAttachedFiles] = useState<FilePreview[]>([]);
 	const [isDraggingOver, setIsDraggingOver] = useState(false);
 
-	// Стиль отображения вложений: сетка (grid) по умолчанию
+	// Стиль отображения вложений
 	const [attachmentsViewMode, setAttachmentsViewMode] = useState<
 		"grid" | "carousel"
 	>("grid");
 
-	// Модалка полноразмерного просмотра изображения (Lightbox)
+	// Модалка полноразмерного просмотра изображения
 	const [fullViewImage, setFullViewImage] = useState<string | null>(null);
 
 	// Календарь для создания поста
@@ -163,6 +180,11 @@ export default function App() {
 	const [viewMonth, setViewMonth] = useState<Date>(new Date());
 	const calendarRef = useRef<HTMLDivElement>(null);
 
+	// Календарь контента
+	const [contentCalendarMonth, setContentCalendarMonth] = useState<Date>(
+		new Date(),
+	);
+
 	// Модальное окно изменения времени поста в очереди
 	const [rescheduleModalPost, setRescheduleModalPost] =
 		useState<PostItem | null>(null);
@@ -173,10 +195,15 @@ export default function App() {
 		new Date(),
 	);
 
-	// Модальное окно возвращения поста из ВК в локальную очередь
+	// Модальное окно возвращения поста из ВК
 	const [revertModalPost, setRevertModalPost] = useState<PostItem | null>(
 		null,
 	);
+
+	// Модальное окно пакетной генерации
+	const [showBatchModal, setShowBatchModal] = useState(false);
+	const [batchChunkSize, setBatchChunkSize] = useState<number>(1);
+	const [isBatchCreating, setIsBatchCreating] = useState(false);
 
 	// Настройки публикации
 	const [commentsOnPost, setCommentsOnPost] = useState(true);
@@ -195,14 +222,14 @@ export default function App() {
 	const [showTokenModal, setShowTokenModal] = useState(false);
 	const [newTokenInput, setNewTokenInput] = useState("");
 	const [isAddingToken, setIsAddingToken] = useState(false);
-	const [isAutoListeningClipboard, setIsAutoListeningClipboard] =
-		useState(false);
 
 	const [showPatternModal, setShowPatternModal] = useState(false);
 	const [newPatternName, setNewPatternName] = useState("");
 	const [newPatternTimes, setNewPatternTimes] = useState(
-		"12:00, 16:00, 20:00",
+		"14:00, 18:00, 21:00",
 	);
+	const [newPatternIntervalDays, setNewPatternIntervalDays] =
+		useState<number>(1);
 
 	const syncClientTimezone = async () => {
 		try {
@@ -238,7 +265,12 @@ export default function App() {
 			});
 			setTargets(tgts);
 			if (tgts.length > 0) {
-				setSelectedTargetId(tgts[0].id);
+				setSelectedTargetId((prev) => {
+					if (prev && tgts.some((t) => t.id === prev)) {
+						return prev;
+					}
+					return tgts[0].id;
+				});
 			} else {
 				setSelectedTargetId(null);
 			}
@@ -330,37 +362,6 @@ export default function App() {
 		updateNextSlotPreview();
 	}, [selectedTargetId, selectedPatternId, queue]);
 
-	// Фоновый слушатель буфера обмена для автоматического обновления токена
-	useEffect(() => {
-		let timer: any = null;
-		if (isAutoListeningClipboard) {
-			timer = setInterval(async () => {
-				try {
-					const text = await navigator.clipboard.readText();
-					if (text && text.includes("access_token=")) {
-						const token = cleanTokenInput(text);
-						if (token.length > 20) {
-							setIsAutoListeningClipboard(false);
-							setIsAddingToken(true);
-							const created = await invoke<Account>("add_token", {
-								rawToken: token,
-							});
-							setNewTokenInput("");
-							setShowTokenModal(false);
-							await loadAccounts();
-							setActiveAccountId(created.id);
-							await loadTargetsForAccount(created.id);
-							alert("Токен успешно обновлен!");
-						}
-					}
-				} catch {}
-			}, 800);
-		}
-		return () => {
-			if (timer) clearInterval(timer);
-		};
-	}, [isAutoListeningClipboard]);
-
 	const appendFiles = async (paths: string[]) => {
 		const newItems: FilePreview[] = await Promise.all(
 			paths.map(async (path) => {
@@ -391,7 +392,10 @@ export default function App() {
 			}),
 		);
 
-		setAttachedFiles((prev) => [...prev, ...newItems]);
+		setAttachedFiles((prev) => {
+			const combined = [...prev, ...newItems];
+			return combined.slice(0, 10);
+		});
 	};
 
 	useEffect(() => {
@@ -452,7 +456,6 @@ export default function App() {
 	const handleOpenBrowserForLogin = async () => {
 		try {
 			await invoke("open_vk_auth_browser");
-			setIsAutoListeningClipboard(true);
 		} catch (e) {
 			alert("Не удалось открыть браузер: " + e);
 		}
@@ -487,7 +490,6 @@ export default function App() {
 			});
 			setNewTokenInput("");
 			setShowTokenModal(false);
-			setIsAutoListeningClipboard(false);
 			await loadAccounts();
 			setActiveAccountId(created.id);
 			await loadTargetsForAccount(created.id);
@@ -501,7 +503,7 @@ export default function App() {
 	const handleDeleteAccount = async () => {
 		if (!activeAccountId) return;
 		const current = accounts.find((a) => a.id === activeAccountId);
-		if (!confirm(`Отключить аккаунт "${current?.name}"?`)) return;
+		if (!confirm(`Удалить токен "${current?.name}"?`)) return;
 
 		try {
 			await invoke("delete_account", { accountId: activeAccountId });
@@ -570,6 +572,7 @@ export default function App() {
 				name: newPatternName.trim(),
 				times: timesArray,
 				timezone: clientTz,
+				intervalDays: newPatternIntervalDays,
 			});
 			setPatterns((prev) => [...prev, created]);
 			setSelectedPatternId(created.id);
@@ -580,13 +583,66 @@ export default function App() {
 		}
 	};
 
-	const handleCreatePost = async () => {
+	const handleLoadPostToEditor = (post: PostItem) => {
+		setEditingPostId(post.id);
+		setPostText(post.text);
+		setAuthorsName(post.signed);
+		setCommentsOnPost(!post.close_comments);
+		setNotifyFollowers(!post.mute_notifications);
+		setAdFromCreator(post.mark_as_ads);
+		setAttachmentsViewMode(
+			post.attachments_view_mode === "carousel" ? "carousel" : "grid",
+		);
+
+		const convertedFiles: FilePreview[] = post.attachments.map((att) => ({
+			path: att.local_path || "",
+			name: att.file_name,
+			isImage: true,
+			previewUrl: att.thumb_data,
+		}));
+		setAttachedFiles(convertedFiles);
+		setIsRightPanelOpen(true);
+	};
+
+	const handleCancelEditing = () => {
+		setEditingPostId(null);
+		setPostText("");
+		setAttachedFiles([]);
+	};
+
+	const handleSavePost = async () => {
 		if (!postText.trim() && attachedFiles.length === 0) {
 			alert("Добавьте текст или медиафайл");
 			return;
 		}
 		if (!selectedTargetId || !selectedPatternId) {
 			alert("Выберите сообщество");
+			return;
+		}
+
+		if (editingPostId) {
+			try {
+				await invoke("update_post", {
+					postId: editingPostId,
+					text: postText.trim(),
+					signed: authorsName,
+					closeComments: !commentsOnPost,
+					muteNotifications: !notifyFollowers,
+					markAsAds: adFromCreator,
+					attachmentsViewMode,
+					filePaths: attachedFiles
+						.map((f) => f.path)
+						.filter((p) => p.length > 0),
+				});
+				setEditingPostId(null);
+				setPostText("");
+				setAttachedFiles([]);
+				if (selectedTargetId) {
+					syncVkQueue(selectedTargetId);
+				}
+			} catch (e) {
+				alert("Ошибка обновления поста: " + e);
+			}
 			return;
 		}
 
@@ -622,6 +678,64 @@ export default function App() {
 		}
 	};
 
+	const handleCleanLocalFiles = async () => {
+		if (!selectedTargetId) return;
+		if (
+			!confirm(
+				"Удалить с диска исходные файлы постов, которые уже успешно находятся в отложке ВК? Миниатюры в приложении сохранятся.",
+			)
+		)
+			return;
+
+		try {
+			const count = await invoke<number>("clean_uploaded_local_files", {
+				targetId: selectedTargetId,
+			});
+			alert(`Очистка завершена. Освобождено файлов: ${count} шт.`);
+			if (selectedTargetId) syncVkQueue(selectedTargetId);
+		} catch (e) {
+			alert("Ошибка очистки файлов: " + e);
+		}
+	};
+
+	const handleBatchCreate = async () => {
+		if (attachedFiles.length === 0) {
+			alert("Сначала прикрепите файлы для пакетной генерации");
+			return;
+		}
+		if (!selectedTargetId || !selectedPatternId) {
+			alert("Выберите сообщество");
+			return;
+		}
+		setIsBatchCreating(true);
+		try {
+			const count = await invoke<number>("batch_create_posts", {
+				targetId: selectedTargetId,
+				patternId: selectedPatternId,
+				filePaths: attachedFiles.map((f) => f.path),
+				itemsPerPost: batchChunkSize,
+				text: postText.trim(),
+				signed: authorsName,
+				closeComments: !commentsOnPost,
+				muteNotifications: !notifyFollowers,
+				markAsAds: adFromCreator,
+				attachmentsViewMode,
+			});
+
+			setShowBatchModal(false);
+			setPostText("");
+			setAttachedFiles([]);
+			if (selectedTargetId) syncVkQueue(selectedTargetId);
+			alert(
+				`Успешно создано и расставлено по слотам постов: ${count} шт.`,
+			);
+		} catch (e) {
+			alert("Ошибка пакетного создания: " + e);
+		} finally {
+			setIsBatchCreating(false);
+		}
+	};
+
 	const handleDeleteLocalPost = async (id: number) => {
 		await invoke("delete_local_post", { postId: id });
 		if (selectedTargetId) {
@@ -646,7 +760,6 @@ export default function App() {
 		}
 	};
 
-	// Возврат поста из ВК в локальную очередь на то же время
 	const handleRevertSameTime = async (postId: number) => {
 		try {
 			await invoke("revert_vk_post_to_local_same_time", { postId });
@@ -660,7 +773,6 @@ export default function App() {
 		}
 	};
 
-	// Возврат поста из ВК в локальную очередь на следующий слот по паттерну
 	const handleRevertNextSlot = async (postId: number) => {
 		if (!selectedPatternId) {
 			alert("Выберите паттерн");
@@ -761,6 +873,15 @@ export default function App() {
 		end: calendarEnd,
 	});
 
+	const contentMonthStart = startOfMonth(contentCalendarMonth);
+	const contentMonthEnd = endOfMonth(contentCalendarMonth);
+	const contentCalStart = startOfWeek(contentMonthStart, { weekStartsOn: 1 });
+	const contentCalEnd = endOfWeek(contentMonthEnd, { weekStartsOn: 1 });
+	const contentDays = eachDayOfInterval({
+		start: contentCalStart,
+		end: contentCalEnd,
+	});
+
 	const getCustomDisplayString = () => {
 		const d = new Date(selectedDate);
 		d.setHours(pickerHours, pickerMinutes, 0, 0);
@@ -791,7 +912,7 @@ export default function App() {
 				: historyPosts;
 
 	return (
-		<div className="flex flex-col h-screen bg-slate-950 text-slate-100">
+		<div className="flex flex-col h-screen bg-slate-950 text-slate-100 relative">
 			{/* Шапка */}
 			<header className="flex items-center justify-between border-b border-slate-800 bg-slate-900/80 px-6 py-3 select-none">
 				<div className="flex items-center gap-6">
@@ -806,12 +927,12 @@ export default function App() {
 
 					<div className="flex items-center gap-2">
 						<span className="text-xs text-slate-400 font-medium">
-							Аккаунт:
+							Токен:
 						</span>
 						{accounts.length > 0 ? (
 							<div className="flex items-center gap-1.5">
 								<select
-									className="rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-semibold text-slate-100 border border-slate-700 focus:outline-none focus:border-blue-500 cursor-pointer max-w-[240px] truncate"
+									className="rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-semibold text-slate-100 border border-slate-700 focus:outline-none focus:border-blue-500 cursor-pointer max-w-[280px] truncate"
 									value={activeAccountId || ""}
 									onChange={(e) =>
 										handleSwitchAccount(
@@ -827,30 +948,22 @@ export default function App() {
 								</select>
 
 								<button
-									onClick={handleOpenBrowserForLogin}
-									className="p-1.5 rounded-lg text-slate-400 hover:text-blue-400 hover:bg-slate-800 transition-colors"
-									title="Обновить токен в браузере"
-								>
-									<RefreshCw className="h-3.5 w-3.5" />
-								</button>
-
-								<button
 									onClick={handleDeleteAccount}
 									className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-800 transition-colors"
-									title="Отключить этот аккаунт"
+									title="Удалить этот токен"
 								>
 									<Trash2 className="h-3.5 w-3.5" />
 								</button>
 							</div>
 						) : (
 							<span className="text-xs text-amber-400/90 font-medium">
-								Нет подключений
+								Нет токенов
 							</span>
 						)}
 
 						{accounts.length === 0 && (
 							<button
-								onClick={() => setShowTokenModal(true)}
+								onClick={handleOpenBrowserForLogin}
 								className="flex items-center gap-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 px-3.5 py-1.5 text-xs font-semibold text-white transition-colors shadow-md shadow-blue-600/20"
 							>
 								<ExternalLink className="h-3.5 w-3.5" />
@@ -859,10 +972,7 @@ export default function App() {
 						)}
 
 						<button
-							onClick={() => {
-								setIsAutoListeningClipboard(false);
-								setShowTokenModal(true);
-							}}
+							onClick={() => setShowTokenModal(true)}
 							className="flex items-center gap-1.5 rounded-lg bg-slate-800 text-slate-300 border border-slate-700 hover:border-slate-600 px-3 py-1.5 text-xs font-medium hover:bg-slate-750 transition-colors"
 						>
 							<Plus className="h-3.5 w-3.5 text-slate-400" />
@@ -897,7 +1007,6 @@ export default function App() {
 						</div>
 					)}
 
-					{/* Кнопка сворачивания/разворачивания правого блока */}
 					<button
 						onClick={() => setIsRightPanelOpen(!isRightPanelOpen)}
 						className={`p-1.5 rounded-lg border transition-colors ${
@@ -922,7 +1031,7 @@ export default function App() {
 
 			{/* Основное пространство */}
 			<main className="flex flex-1 overflow-hidden relative">
-				{/* Левая панель: Создание записи */}
+				{/* Левая панель */}
 				<section
 					className={`flex flex-col border-r border-slate-800 p-6 overflow-y-auto transition-all duration-300 ease-in-out ${
 						isRightPanelOpen
@@ -931,9 +1040,18 @@ export default function App() {
 					}`}
 				>
 					<div className="mb-3 flex items-center justify-between">
-						<h2 className="text-sm font-semibold tracking-wide text-slate-300">
-							СОЗДАНИЕ ЗАПИСИ
-						</h2>
+						<div className="flex items-center gap-2">
+							<h2 className="text-sm font-semibold tracking-wide text-slate-300">
+								{editingPostId
+									? `РЕДАКТИРОВАНИЕ ПОСТА #${editingPostId}`
+									: "СОЗДАНИЕ ЗАПИСИ"}
+							</h2>
+							{editingPostId && (
+								<span className="px-2 py-0.5 rounded bg-blue-500/20 border border-blue-500/30 text-[10px] font-semibold text-blue-300">
+									Режим правки
+								</span>
+							)}
+						</div>
 
 						<div className="flex items-center gap-2">
 							<div className="flex items-center gap-1.5 bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1">
@@ -953,7 +1071,10 @@ export default function App() {
 											value={p.id}
 											className="bg-slate-900"
 										>
-											{p.name}
+											{p.name}{" "}
+											{p.interval_days > 1
+												? `(раз в ${p.interval_days} дн.)`
+												: ""}
 										</option>
 									))}
 								</select>
@@ -974,11 +1095,22 @@ export default function App() {
 							className="w-full h-16 min-h-[4rem] max-h-32 rounded-xl bg-slate-900/90 p-3 text-xs text-slate-100 placeholder-slate-500 border border-slate-800 focus:outline-none focus:border-blue-500 transition-colors resize-none overflow-y-auto leading-relaxed"
 							placeholder="Текст записи (необязательно)..."
 							value={postText}
+							maxLength={15895}
 							onChange={(e) => setPostText(e.target.value)}
 						/>
+						<div className="flex justify-end mt-1 px-1">
+							<span
+								className={`text-[10px] font-mono ${
+									postText.length > 14000
+										? "text-amber-400"
+										: "text-slate-500"
+								}`}
+							>
+								{postText.length} / 15 895 символов
+							</span>
+						</div>
 					</div>
 
-					{/* Зона прикрепленных медиа со стрелочной сортировкой */}
 					<div className="flex-1 flex flex-col min-h-[190px]">
 						{attachedFiles.length === 0 ? (
 							<div
@@ -996,24 +1128,55 @@ export default function App() {
 									Перетащите изображения сюда
 								</span>
 								<span className="text-[11px] text-slate-500 mt-1">
-									или нажмите для выбора файлов
+									или нажмите для выбора файлов (до 10 шт.)
 								</span>
 							</div>
 						) : (
 							<div className="flex-1 flex flex-col bg-slate-900/60 border border-slate-800 rounded-2xl p-3.5 overflow-hidden">
 								<div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-800 text-xs">
-									<span className="font-semibold text-slate-300">
-										Прикрепленные файлы (
-										{attachedFiles.length}) • используйте
-										стрелки для смены порядка
-									</span>
-									<button
-										onClick={handleSelectFiles}
-										className="flex items-center gap-1 text-[11px] text-blue-400 hover:text-blue-300 font-medium"
-									>
-										<ImagePlus className="h-3.5 w-3.5" />
-										<span>Добавить еще</span>
-									</button>
+									<div className="flex items-center gap-2">
+										<span className="font-semibold text-slate-300">
+											Прикрепленные файлы
+										</span>
+										<span
+											className={`text-[11px] font-mono px-2 py-0.5 rounded-md ${
+												attachedFiles.length >= 10
+													? "bg-amber-500/20 text-amber-300"
+													: "bg-slate-800 text-slate-400"
+											}`}
+										>
+											{attachedFiles.length} / 10 медиа
+										</span>
+									</div>
+
+									<div className="flex items-center gap-2">
+										{!editingPostId &&
+											attachedFiles.length > 1 && (
+												<button
+													onClick={() =>
+														setShowBatchModal(true)
+													}
+													className="flex items-center gap-1 text-[11px] text-amber-400 hover:text-amber-300 font-semibold px-2 py-1 rounded-lg bg-amber-500/10 border border-amber-500/20"
+													title="Разбить эти файлы на несколько постов"
+												>
+													<Layers3 className="h-3.5 w-3.5" />
+													<span>
+														Пакетная генерация
+													</span>
+												</button>
+											)}
+
+										<button
+											onClick={handleSelectFiles}
+											disabled={
+												attachedFiles.length >= 10
+											}
+											className="flex items-center gap-1 text-[11px] text-blue-400 hover:text-blue-300 font-medium disabled:opacity-40"
+										>
+											<ImagePlus className="h-3.5 w-3.5" />
+											<span>Добавить еще</span>
+										</button>
+									</div>
 								</div>
 
 								<div
@@ -1053,12 +1216,10 @@ export default function App() {
 												</div>
 											)}
 
-											{/* Индикатор позиции */}
 											<span className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-black/70 text-[10px] font-mono text-slate-300 font-bold backdrop-blur-sm">
 												#{idx + 1}
 											</span>
 
-											{/* Панель управления порядком внизу карточки */}
 											<div className="absolute inset-x-0 bottom-0 py-1 bg-slate-950/85 backdrop-blur-sm flex items-center justify-between px-1.5 border-t border-slate-800/80">
 												<button
 													disabled={idx === 0}
@@ -1113,7 +1274,6 @@ export default function App() {
 						)}
 					</div>
 
-					{/* Настройки публикации */}
 					<div className="mt-3 rounded-2xl bg-slate-900/90 border border-slate-800 overflow-hidden select-none">
 						<button
 							onClick={() => setIsSettingsOpen(!isSettingsOpen)}
@@ -1129,7 +1289,6 @@ export default function App() {
 
 						{isSettingsOpen && (
 							<div className="p-3 pt-0 space-y-3.5 border-t border-slate-800/60">
-								{/* Стиль отображения вложений: Сетка / Карусель */}
 								<div className="flex items-center justify-between pt-2">
 									<div className="flex flex-col">
 										<span className="text-xs font-medium text-slate-200">
@@ -1267,212 +1426,246 @@ export default function App() {
 						)}
 					</div>
 
-					{/* Блок ручного выбора времени слота */}
-					<div
-						className="mt-3 p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800 flex flex-col gap-3 text-xs select-none relative"
-						ref={calendarRef}
-					>
-						<div className="flex items-center justify-between">
-							<div className="flex items-center gap-2">
-								<Calendar className="h-4 w-4 text-blue-400" />
-								<span className="text-slate-200 font-medium">
-									Задать время слота вручную
-								</span>
+					{!editingPostId && (
+						<div
+							className="mt-3 p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800 flex flex-col gap-3 text-xs select-none relative"
+							ref={calendarRef}
+						>
+							<div className="flex items-center justify-between">
+								<div className="flex items-center gap-2">
+									<Calendar className="h-4 w-4 text-blue-400" />
+									<span className="text-slate-200 font-medium">
+										Задать время слота вручную
+									</span>
+								</div>
+								<label className="relative inline-flex items-center cursor-pointer">
+									<input
+										type="checkbox"
+										checked={isManualTime}
+										onChange={(e) => {
+											setIsManualTime(e.target.checked);
+											if (!e.target.checked)
+												setIsCalendarOpen(false);
+										}}
+										className="sr-only peer"
+									/>
+									<div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-500 border border-slate-700"></div>
+								</label>
 							</div>
-							<label className="relative inline-flex items-center cursor-pointer">
-								<input
-									type="checkbox"
-									checked={isManualTime}
-									onChange={(e) => {
-										setIsManualTime(e.target.checked);
-										if (!e.target.checked)
-											setIsCalendarOpen(false);
-									}}
-									className="sr-only peer"
-								/>
-								<div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-500 border border-slate-700"></div>
-							</label>
-						</div>
 
-						{isManualTime && (
-							<div className="pt-2.5 border-t border-slate-800 flex items-center justify-between gap-3">
-								<span className="text-[11px] text-slate-400">
-									Время публикации:
-								</span>
-								<button
-									onClick={() =>
-										setIsCalendarOpen(!isCalendarOpen)
-									}
-									className="flex items-center gap-2 bg-slate-800 hover:bg-slate-750 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-100 font-mono focus:outline-none focus:border-blue-500 transition-colors"
-								>
-									<Clock className="h-3.5 w-3.5 text-blue-400" />
-									<span>{getCustomDisplayString()}</span>
-								</button>
-							</div>
-						)}
-
-						{isCalendarOpen && isManualTime && (
-							<div className="absolute bottom-full left-0 mb-2 w-72 bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl p-3.5 z-50">
-								<div className="flex items-center justify-between mb-3 text-xs">
-									<span className="font-semibold capitalize text-slate-200">
-										{format(viewMonth, "LLLL yyyy", {
-											locale: ru,
-										})}
+							{isManualTime && (
+								<div className="pt-2.5 border-t border-slate-800 flex items-center justify-between gap-3">
+									<span className="text-[11px] text-slate-400">
+										Время публикации:
 									</span>
-									<div className="flex items-center gap-1">
-										<button
-											onClick={() =>
-												setViewMonth(
-													subMonths(viewMonth, 1),
-												)
-											}
-											className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-slate-200"
-										>
-											<ChevronLeft className="h-4 w-4" />
-										</button>
-										<button
-											onClick={() =>
-												setViewMonth(
-													addMonths(viewMonth, 1),
-												)
-											}
-											className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-slate-200"
-										>
-											<ChevronRight className="h-4 w-4" />
-										</button>
-									</div>
+									<button
+										onClick={() =>
+											setIsCalendarOpen(!isCalendarOpen)
+										}
+										className="flex items-center gap-2 bg-slate-800 hover:bg-slate-750 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-100 font-mono focus:outline-none focus:border-blue-500 transition-colors"
+									>
+										<Clock className="h-3.5 w-3.5 text-blue-400" />
+										<span>{getCustomDisplayString()}</span>
+									</button>
 								</div>
+							)}
 
-								<div className="grid grid-cols-7 gap-1 text-center text-[10px] text-slate-500 font-medium mb-1">
-									<span>Пн</span>
-									<span>Вт</span>
-									<span>Ср</span>
-									<span>Чт</span>
-									<span>Пт</span>
-									<span className="text-amber-500/80">
-										Сб
-									</span>
-									<span className="text-amber-500/80">
-										Вс
-									</span>
-								</div>
-
-								<div className="grid grid-cols-7 gap-1 text-center text-xs">
-									{daysInCalendar.map((day, idx) => {
-										const isSelected = isSameDay(
-											day,
-											selectedDate,
-										);
-										const isCurrentMonth =
-											day.getMonth() ===
-											viewMonth.getMonth();
-										return (
-											<button
-												key={idx}
-												onClick={() =>
-													setSelectedDate(day)
-												}
-												className={`h-7 w-7 mx-auto rounded-lg flex items-center justify-center font-mono text-[11px] transition-colors ${
-													isSelected
-														? "bg-blue-600 text-white font-semibold shadow-md shadow-blue-600/30"
-														: isCurrentMonth
-															? "text-slate-200 hover:bg-slate-800"
-															: "text-slate-600 hover:bg-slate-800/40"
-												}`}
-											>
-												{format(day, "d")}
-											</button>
-										);
-									})}
-								</div>
-
-								<div className="mt-3 pt-3 border-t border-slate-800 flex items-center justify-between text-xs">
-									<span className="text-slate-400 text-[11px]">
-										Время (24h):
-									</span>
-									<div className="flex items-center gap-1 font-mono">
-										<select
-											value={pickerHours}
-											onChange={(e) =>
-												setPickerHours(
-													Number(e.target.value),
-												)
-											}
-											className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-blue-500 cursor-pointer"
-										>
-											{Array.from({ length: 24 }).map(
-												(_, i) => (
-													<option key={i} value={i}>
-														{i
-															.toString()
-															.padStart(2, "0")}
-													</option>
-												),
-											)}
-										</select>
-										<span className="text-slate-500 font-bold">
-											:
+							{isCalendarOpen && isManualTime && (
+								<div className="absolute bottom-full left-0 mb-2 w-72 bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl p-3.5 z-50">
+									<div className="flex items-center justify-between mb-3 text-xs">
+										<span className="font-semibold capitalize text-slate-200">
+											{format(viewMonth, "LLLL yyyy", {
+												locale: ru,
+											})}
 										</span>
-										<select
-											value={pickerMinutes}
-											onChange={(e) =>
-												setPickerMinutes(
-													Number(e.target.value),
-												)
-											}
-											className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-blue-500 cursor-pointer"
-										>
-											{Array.from({ length: 12 }).map(
-												(_, i) => {
-													const m = i * 5;
-													return (
+										<div className="flex items-center gap-1">
+											<button
+												onClick={() =>
+													setViewMonth(
+														subMonths(viewMonth, 1),
+													)
+												}
+												className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-slate-200"
+											>
+												<ChevronLeft className="h-4 w-4" />
+											</button>
+											<button
+												onClick={() =>
+													setViewMonth(
+														addMonths(viewMonth, 1),
+													)
+												}
+												className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-slate-200"
+											>
+												<ChevronRight className="h-4 w-4" />
+											</button>
+										</div>
+									</div>
+
+									<div className="grid grid-cols-7 gap-1 text-center text-[10px] text-slate-500 font-medium mb-1">
+										<span>Пн</span>
+										<span>Вт</span>
+										<span>Ср</span>
+										<span>Чт</span>
+										<span>Пт</span>
+										<span className="text-amber-500/80">
+											Сб
+										</span>
+										<span className="text-amber-500/80">
+											Вс
+										</span>
+									</div>
+
+									<div className="grid grid-cols-7 gap-1 text-center text-xs">
+										{daysInCalendar.map((day, idx) => {
+											const isSelected = isSameDay(
+												day,
+												selectedDate,
+											);
+											const isCurrentMonth =
+												day.getMonth() ===
+												viewMonth.getMonth();
+											return (
+												<button
+													key={idx}
+													onClick={() =>
+														setSelectedDate(day)
+													}
+													className={`h-7 w-7 mx-auto rounded-lg flex items-center justify-center font-mono text-[11px] transition-colors ${
+														isSelected
+															? "bg-blue-600 text-white font-semibold shadow-md shadow-blue-600/30"
+															: isCurrentMonth
+																? "text-slate-200 hover:bg-slate-800"
+																: "text-slate-600 hover:bg-slate-800/40"
+													}`}
+												>
+													{format(day, "d")}
+												</button>
+											);
+										})}
+									</div>
+
+									<div className="mt-3 pt-3 border-t border-slate-800 flex items-center justify-between text-xs">
+										<span className="text-slate-400 text-[11px]">
+											Время (24h):
+										</span>
+										<div className="flex items-center gap-1 font-mono">
+											<select
+												value={pickerHours}
+												onChange={(e) =>
+													setPickerHours(
+														Number(e.target.value),
+													)
+												}
+												className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-blue-500 cursor-pointer"
+											>
+												{Array.from({ length: 24 }).map(
+													(_, i) => (
 														<option
-															key={m}
-															value={m}
+															key={i}
+															value={i}
 														>
-															{m
+															{i
 																.toString()
 																.padStart(
 																	2,
 																	"0",
 																)}
 														</option>
-													);
-												},
-											)}
-										</select>
+													),
+												)}
+											</select>
+											<span className="text-slate-500 font-bold">
+												:
+											</span>
+											<select
+												value={pickerMinutes}
+												onChange={(e) =>
+													setPickerMinutes(
+														Number(e.target.value),
+													)
+												}
+												className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-blue-500 cursor-pointer"
+											>
+												{Array.from({ length: 12 }).map(
+													(_, i) => {
+														const m = i * 5;
+														return (
+															<option
+																key={m}
+																value={m}
+															>
+																{m
+																	.toString()
+																	.padStart(
+																		2,
+																		"0",
+																	)}
+															</option>
+														);
+													},
+												)}
+											</select>
+										</div>
+									</div>
+
+									<div className="mt-3 flex justify-end">
+										<button
+											onClick={() =>
+												setIsCalendarOpen(false)
+											}
+											className="w-full py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold shadow-md"
+										>
+											Применить
+										</button>
 									</div>
 								</div>
+							)}
+						</div>
+					)}
 
-								<div className="mt-3 flex justify-end">
-									<button
-										onClick={() => setIsCalendarOpen(false)}
-										className="w-full py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold shadow-md"
-									>
-										Применить
-									</button>
-								</div>
-							</div>
+					<div className="mt-4 pt-3 border-t border-slate-800 flex items-center gap-3">
+						{editingPostId && (
+							<button
+								onClick={handleCancelEditing}
+								className="px-4 py-3.5 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-300 font-semibold text-sm transition-colors"
+							>
+								Отмена
+							</button>
 						)}
-					</div>
 
-					<div className="mt-4 pt-3 border-t border-slate-800">
 						<button
-							onClick={handleCreatePost}
+							onClick={handleSavePost}
 							disabled={!selectedTargetId}
-							className="flex items-center justify-center gap-2.5 w-full rounded-xl bg-blue-600 py-3.5 text-sm font-semibold text-white shadow-lg shadow-blue-600/20 hover:bg-blue-500 active:scale-[0.99] disabled:opacity-50 disabled:pointer-events-none transition-all"
+							className={`flex-1 flex items-center justify-center gap-2.5 rounded-xl py-3.5 text-sm font-semibold text-white shadow-lg transition-all active:scale-[0.99] disabled:opacity-50 disabled:pointer-events-none ${
+								editingPostId
+									? "bg-emerald-600 hover:bg-emerald-500 shadow-emerald-600/20"
+									: "bg-blue-600 hover:bg-blue-500 shadow-blue-600/20"
+							}`}
 						>
-							<Plus className="h-4 w-4" />
-							<span>
-								{isManualTime
-									? `Добавить на выбранное время — ${getCustomDisplayString()}`
-									: `Добавить в очередь — ${nextSlotDisplay}`}
-							</span>
+							{editingPostId ? (
+								<>
+									<Save className="h-4 w-4" />
+									<span>
+										Сохранить изменения в посте #
+										{editingPostId}
+									</span>
+								</>
+							) : (
+								<>
+									<Plus className="h-4 w-4" />
+									<span>
+										{isManualTime
+											? `Добавить на выбранное время — ${getCustomDisplayString()}`
+											: `Добавить в очередь — ${nextSlotDisplay}`}
+									</span>
+								</>
+							)}
 						</button>
 					</div>
 				</section>
 
-				{/* Правая панель: 3 вкладки очередей с плавной анимацией скрытия */}
+				{/* Правая панель */}
 				<section
 					className={`flex flex-col p-6 overflow-hidden bg-slate-950/40 transition-all duration-300 ease-in-out ${
 						isRightPanelOpen
@@ -1491,9 +1684,7 @@ export default function App() {
 								}`}
 							>
 								<Clock className="h-3.5 w-3.5" />
-								<span>
-									Локальная очередь ({localPosts.length})
-								</span>
+								<span>Локальная ({localPosts.length})</span>
 							</button>
 
 							<button
@@ -1528,6 +1719,42 @@ export default function App() {
 						</div>
 
 						<div className="flex items-center gap-2">
+							<div className="flex items-center bg-slate-900 border border-slate-800 rounded-xl p-0.5">
+								<button
+									onClick={() => setQueueViewMode("list")}
+									className={`p-1.5 rounded-lg text-xs transition-colors ${
+										queueViewMode === "list"
+											? "bg-slate-800 text-blue-400"
+											: "text-slate-400 hover:text-slate-200"
+									}`}
+									title="Вид списком"
+								>
+									<ListFilter className="h-4 w-4" />
+								</button>
+								<button
+									onClick={() => setQueueViewMode("calendar")}
+									className={`p-1.5 rounded-lg text-xs transition-colors ${
+										queueViewMode === "calendar"
+											? "bg-slate-800 text-blue-400"
+											: "text-slate-400 hover:text-slate-200"
+									}`}
+									title="Визуальный календарь контента"
+								>
+									<CalendarDays className="h-4 w-4" />
+								</button>
+							</div>
+
+							{activeQueueTab === "vk" &&
+								vkDelayedPosts.length > 0 && (
+									<button
+										onClick={handleCleanLocalFiles}
+										className="p-2 rounded-xl text-slate-400 hover:text-emerald-400 bg-slate-900 border border-slate-800 hover:border-slate-700 transition-colors"
+										title="Очистить с диска ПК оригиналы уже загруженных в ВК файлов"
+									>
+										<HardDriveDownload className="h-4 w-4" />
+									</button>
+								)}
+
 							<button
 								onClick={() =>
 									selectedTargetId &&
@@ -1574,311 +1801,530 @@ export default function App() {
 						</div>
 					</div>
 
-					<div className="flex-1 overflow-y-auto space-y-2.5 pr-1">
-						{displayedPosts.length === 0 ? (
-							<div className="flex flex-col items-center justify-center h-56 border border-dashed border-slate-800/80 rounded-2xl text-slate-500 text-xs">
-								<Clock className="h-8 w-8 text-slate-700 mb-2" />
-								<span className="font-medium text-slate-400">
-									{activeQueueTab === "local"
-										? "Локальная очередь пуста"
-										: activeQueueTab === "vk"
-											? "В отложке ВК нет постов"
-											: "История постов пуста"}
+					{queueViewMode === "calendar" ? (
+						<div className="flex-1 flex flex-col bg-slate-900/60 border border-slate-800 rounded-2xl p-4 overflow-hidden">
+							<div className="flex items-center justify-between mb-3 text-xs">
+								<span className="font-semibold text-slate-200 capitalize">
+									{format(contentCalendarMonth, "LLLL yyyy", {
+										locale: ru,
+									})}
 								</span>
-								<span className="mt-1 text-slate-600">
-									{activeQueueTab === "local"
-										? "Созданные посты появятся здесь до отправки в ВК"
-										: activeQueueTab === "vk"
-											? "Синхронизируйте группу, чтобы увидеть отложенные посты на стене"
-											: "Все созданные посты сохраняются здесь"}
-								</span>
-							</div>
-						) : (
-							displayedPosts.map((post, index) => {
-								const isExpanded = expandedPostIds.includes(
-									post.id,
-								);
-								const isVkPost =
-									post.status === "transferred_to_vk";
-								const isHistoryTab =
-									activeQueueTab === "history";
-
-								return (
-									<div
-										key={post.id}
-										className="flex flex-col rounded-xl bg-slate-900/70 border border-slate-800/80 hover:border-slate-700 transition-colors overflow-hidden"
+								<div className="flex items-center gap-1">
+									<button
+										onClick={() =>
+											setContentCalendarMonth(
+												subMonths(
+													contentCalendarMonth,
+													1,
+												),
+											)
+										}
+										className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-slate-200"
 									>
+										<ChevronLeft className="h-4 w-4" />
+									</button>
+									<button
+										onClick={() =>
+											setContentCalendarMonth(
+												addMonths(
+													contentCalendarMonth,
+													1,
+												),
+											)
+										}
+										className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-slate-200"
+									>
+										<ChevronRight className="h-4 w-4" />
+									</button>
+								</div>
+							</div>
+
+							<div className="grid grid-cols-7 gap-1.5 text-center text-[11px] text-slate-500 font-medium mb-1.5">
+								<span>Пн</span>
+								<span>Вт</span>
+								<span>Ср</span>
+								<span>Чт</span>
+								<span>Пт</span>
+								<span className="text-amber-500/80">Сб</span>
+								<span className="text-amber-500/80">Вс</span>
+							</div>
+
+							<div className="flex-1 grid grid-cols-7 gap-1.5 overflow-y-auto">
+								{contentDays.map((day, idx) => {
+									const dayPosts = displayedPosts.filter(
+										(p) =>
+											isSameDay(
+												new Date(p.scheduled_at_utc),
+												day,
+											),
+									);
+									const isCurrentMonth =
+										day.getMonth() ===
+										contentCalendarMonth.getMonth();
+
+									return (
 										<div
-											onClick={() =>
-												toggleExpandPost(post.id)
-											}
-											className="flex items-start justify-between gap-4 p-4 cursor-pointer select-none"
+											key={idx}
+											className={`min-h-[70px] rounded-xl border p-1.5 flex flex-col transition-colors ${
+												isCurrentMonth
+													? "bg-slate-950/70 border-slate-800/80"
+													: "bg-slate-950/20 border-slate-900 text-slate-600"
+											}`}
 										>
-											<div className="flex-1 min-w-0">
-												<div className="flex items-center gap-2.5 text-xs mb-2">
-													<span className="text-[11px] font-mono text-slate-500">
-														#{index + 1}
-													</span>
-													<span className="font-semibold text-blue-400 font-mono">
-														{format(
-															new Date(
-																post.scheduled_at_utc,
-															),
-															"dd/MM/yyyy HH:mm",
-														)}
-													</span>
+											<span className="text-[10px] font-mono text-slate-400 font-semibold mb-1">
+												{format(day, "d")}
+											</span>
 
-													{post.status ===
-														"queued" && (
-														<span className="rounded-md bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-400 border border-amber-500/20">
-															Локально
-														</span>
-													)}
-													{isVkPost && (
-														<span className="flex items-center gap-1 rounded-md bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-400 border border-emerald-500/20">
-															<CheckCircle2 className="h-3 w-3" />{" "}
-															В отложке ВК
-														</span>
-													)}
-													{post.status ===
-														"failed" && (
-														<span className="flex items-center gap-1 rounded-md bg-rose-500/10 px-2 py-0.5 text-[10px] font-semibold text-rose-400 border border-rose-500/20">
-															<AlertCircle className="h-3 w-3" />{" "}
-															Ошибка
-														</span>
-													)}
-													{post.status ===
-														"archived" && (
-														<span className="rounded-md bg-slate-800 px-2 py-0.5 text-[10px] font-semibold text-slate-400 border border-slate-700">
-															Архив / Завершён
-														</span>
-													)}
-
-													{post.attachments_count >
-														0 && (
-														<span className="text-slate-400 text-[11px]">
-															•{" "}
-															{
-																post.attachments_count
-															}{" "}
-															влож. (
-															{post.attachments_view_mode ===
-															"carousel"
-																? "карусель"
-																: "сетка"}
+											<div className="flex-1 space-y-1 overflow-y-auto">
+												{dayPosts.map((p) => (
+													<div
+														key={p.id}
+														onClick={() =>
+															toggleExpandPost(
+																p.id,
 															)
+														}
+														className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-[9px] font-mono text-blue-300 truncate cursor-pointer flex items-center gap-1 border border-slate-700"
+													>
+														<Clock className="h-2.5 w-2.5 flex-shrink-0" />
+														<span>
+															{format(
+																new Date(
+																	p.scheduled_at_utc,
+																),
+																"HH:mm",
+															)}
 														</span>
-													)}
-												</div>
-
-												<p
-													className={`text-xs text-slate-200 leading-relaxed ${isExpanded ? "" : "line-clamp-2"}`}
-												>
-													{post.text || (
-														<span className="italic text-slate-500">
-															Без
-															сопроводительного
-															текста
-														</span>
-													)}
-												</p>
-											</div>
-
-											<div className="flex items-center gap-1">
-												{isHistoryTab ? (
-													<button
-														onClick={(e) => {
-															e.stopPropagation();
-															handleDeleteHistoryPost(
-																post.id,
-															);
-														}}
-														className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition-all"
-														title="Удалить запись из истории"
-													>
-														<Trash2 className="h-4 w-4" />
-													</button>
-												) : isVkPost ? (
-													<button
-														onClick={(e) => {
-															e.stopPropagation();
-															handleDeleteVkPost(
-																post.id,
-															);
-														}}
-														className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition-all"
-														title="Удалить пост из отложки ВК"
-													>
-														<Trash2 className="h-4 w-4" />
-													</button>
-												) : (
-													<button
-														onClick={(e) => {
-															e.stopPropagation();
-															handleDeleteLocalPost(
-																post.id,
-															);
-														}}
-														className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition-all"
-														title="Удалить из локальной очереди"
-													>
-														<Trash2 className="h-4 w-4" />
-													</button>
-												)}
-
-												<div className="p-1 text-slate-500">
-													{isExpanded ? (
-														<ChevronUp className="h-4 w-4" />
-													) : (
-														<ChevronDown className="h-4 w-4" />
-													)}
-												</div>
+														{p.attachments_count >
+															0 && (
+															<span className="text-slate-400">
+																(
+																{
+																	p.attachments_count
+																}
+																)
+															</span>
+														)}
+													</div>
+												))}
 											</div>
 										</div>
+									);
+								})}
+							</div>
+						</div>
+					) : (
+						<div className="flex-1 overflow-y-auto space-y-2.5 pr-1">
+							{displayedPosts.length === 0 ? (
+								<div className="flex flex-col items-center justify-center h-56 border border-dashed border-slate-800/80 rounded-2xl text-slate-500 text-xs">
+									<Clock className="h-8 w-8 text-slate-700 mb-2" />
+									<span className="font-medium text-slate-400">
+										{activeQueueTab === "local"
+											? "Локальная очередь пуста"
+											: activeQueueTab === "vk"
+												? "В отложке ВК нет постов"
+												: "История постов пуста"}
+									</span>
+									<span className="mt-1 text-slate-600">
+										{activeQueueTab === "local"
+											? "Созданные посты появятся здесь до отправки в ВК"
+											: activeQueueTab === "vk"
+												? "Синхронизируйте группу, чтобы увидеть отложенные посты на стене"
+												: "Все созданные посты сохраняются здесь"}
+									</span>
+								</div>
+							) : (
+								displayedPosts.map((post, index) => {
+									const isExpanded = expandedPostIds.includes(
+										post.id,
+									);
+									const isVkPost =
+										post.status === "transferred_to_vk";
+									const isHistoryTab =
+										activeQueueTab === "history";
 
-										{isExpanded && (
-											<div className="px-4 pb-4 pt-1 border-t border-slate-800/60 bg-slate-950/30">
-												{post.error_message && (
-													<div className="mb-3 p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-xs text-rose-400 leading-relaxed">
-														<strong>
-															Причина ошибки:
-														</strong>{" "}
-														{post.error_message}
-													</div>
-												)}
-
-												{/* Кнопка возврата поста из отложки ВК в локальную очередь */}
-												{isVkPost && (
-													<div className="flex items-center gap-2 mb-3 p-2.5 rounded-xl bg-slate-900 border border-slate-800">
-														<span className="text-xs text-slate-400 font-medium">
-															Действие:
+									return (
+										<div
+											key={post.id}
+											className="flex flex-col rounded-xl bg-slate-900/70 border border-slate-800/80 hover:border-slate-700 transition-colors overflow-hidden"
+										>
+											<div
+												onClick={() =>
+													toggleExpandPost(post.id)
+												}
+												className="flex items-start justify-between gap-4 p-4 cursor-pointer select-none"
+											>
+												<div className="flex-1 min-w-0">
+													<div className="flex items-center gap-2.5 text-xs mb-2">
+														<span className="text-[11px] font-mono text-slate-500">
+															#{index + 1}
 														</span>
-														<button
-															onClick={(e) => {
-																e.stopPropagation();
-																setRevertModalPost(
-																	post,
-																);
-															}}
-															className="px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 text-xs font-semibold flex items-center gap-1.5 transition-colors"
-															title="Отозвать пост из ВК обратно в локальную очередь для редактирования"
-														>
-															<Undo2 className="h-3.5 w-3.5" />
-															<span>
-																Вернуть в
-																локальную
-																очередь
+														<span className="font-semibold text-blue-400 font-mono">
+															{format(
+																new Date(
+																	post.scheduled_at_utc,
+																),
+																"dd/MM/yyyy HH:mm",
+															)}
+														</span>
+
+														{post.status ===
+															"queued" && (
+															<span className="rounded-md bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-400 border border-amber-500/20">
+																Локально
 															</span>
-														</button>
-													</div>
-												)}
+														)}
+														{isVkPost && (
+															<span className="flex items-center gap-1 rounded-md bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-400 border border-emerald-500/20">
+																<CheckCircle2 className="h-3 w-3" />{" "}
+																В отложке ВК
+															</span>
+														)}
+														{post.status ===
+															"failed" && (
+															<span className="flex items-center gap-1 rounded-md bg-rose-500/10 px-2 py-0.5 text-[10px] font-semibold text-rose-400 border border-rose-500/20">
+																<AlertCircle className="h-3 w-3" />{" "}
+																Ошибка
+															</span>
+														)}
+														{post.status ===
+															"archived" && (
+															<span className="rounded-md bg-slate-800 px-2 py-0.5 text-[10px] font-semibold text-slate-400 border border-slate-700">
+																Архив / Завершён
+															</span>
+														)}
 
-												{activeQueueTab === "local" && (
-													<div className="flex items-center gap-2 mb-3 p-2.5 rounded-xl bg-slate-900 border border-slate-800">
-														<span className="text-xs text-slate-400 font-medium">
-															Перенести:
-														</span>
+														{post.attachments_count >
+															0 && (
+															<span className="text-slate-400 text-[11px]">
+																•{" "}
+																{
+																	post.attachments_count
+																}{" "}
+																влож. (
+																{post.attachments_view_mode ===
+																"carousel"
+																	? "карусель"
+																	: "сетка"}
+																)
+															</span>
+														)}
+													</div>
+
+													<p
+														className={`text-xs text-slate-200 leading-relaxed ${isExpanded ? "" : "line-clamp-2"}`}
+													>
+														{post.text || (
+															<span className="italic text-slate-500">
+																Без
+																сопроводительного
+																текста
+															</span>
+														)}
+													</p>
+												</div>
+
+												<div className="flex items-center gap-1">
+													{isHistoryTab ? (
 														<button
 															onClick={(e) => {
 																e.stopPropagation();
-																handleRescheduleNextSlot(
+																handleDeleteHistoryPost(
 																	post.id,
 																);
 															}}
-															className="px-3 py-1.5 rounded-lg bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/30 text-xs font-semibold flex items-center gap-1.5 transition-colors"
-															title="Занять следующий доступный слот по расписанию"
+															className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition-all"
+															title="Удалить запись из истории"
 														>
-															<RotateCcw className="h-3.5 w-3.5" />
-															<span>
-																Следующий слот
-															</span>
+															<Trash2 className="h-4 w-4" />
 														</button>
+													) : isVkPost ? (
 														<button
 															onClick={(e) => {
 																e.stopPropagation();
-																openRescheduleModal(
-																	post,
+																handleDeleteVkPost(
+																	post.id,
 																);
 															}}
-															className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-750 text-slate-200 border border-slate-700 text-xs font-medium flex items-center gap-1.5 transition-colors"
-															title="Выбрать точную дату и время вручную"
+															className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition-all"
+															title="Удалить пост из отложки ВК"
 														>
-															<Calendar className="h-3.5 w-3.5 text-blue-400" />
-															<span>
-																Задать время
-															</span>
+															<Trash2 className="h-4 w-4" />
 														</button>
-													</div>
-												)}
+													) : (
+														<button
+															onClick={(e) => {
+																e.stopPropagation();
+																handleDeleteLocalPost(
+																	post.id,
+																);
+															}}
+															className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition-all"
+															title="Удалить из локальной очереди"
+														>
+															<Trash2 className="h-4 w-4" />
+														</button>
+													)}
 
-												{post.attachments &&
-												post.attachments.length > 0 ? (
-													<div>
-														<span className="text-[11px] font-semibold text-slate-400 block mb-2">
-															Прикрепленные
-															вложения:
+													<div className="p-1 text-slate-500">
+														{isExpanded ? (
+															<ChevronUp className="h-4 w-4" />
+														) : (
+															<ChevronDown className="h-4 w-4" />
+														)}
+													</div>
+												</div>
+											</div>
+
+											{isExpanded && (
+												<div className="px-4 pb-4 pt-1 border-t border-slate-800/60 bg-slate-950/30">
+													{post.error_message && (
+														<div className="mb-3 p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-xs text-rose-400 leading-relaxed">
+															<strong>
+																Причина ошибки:
+															</strong>{" "}
+															{post.error_message}
+														</div>
+													)}
+
+													<div className="flex items-center gap-2 mb-3 p-2.5 rounded-xl bg-slate-900 border border-slate-800 flex-wrap">
+														<span className="text-xs text-slate-400 font-medium">
+															Действия:
 														</span>
-														<div className="grid grid-cols-4 gap-2">
-															{post.attachments.map(
-																(
-																	att,
-																	attIdx,
-																) => (
-																	<div
-																		key={
-																			attIdx
-																		}
-																		onClick={() =>
-																			att.thumb_data &&
-																			setFullViewImage(
-																				att.thumb_data,
-																			)
-																		}
-																		className={`h-20 rounded-lg bg-slate-900 border border-slate-800 flex flex-col items-center justify-center overflow-hidden p-1 relative ${
-																			att.thumb_data
-																				? "cursor-pointer hover:border-slate-600"
-																				: ""
-																		}`}
-																	>
-																		{att.thumb_data ? (
-																			<img
-																				src={
-																					att.thumb_data
-																				}
-																				alt={
-																					att.file_name
-																				}
-																				className="h-full w-full object-cover rounded"
-																			/>
-																		) : (
-																			<div className="flex flex-col items-center p-1 text-center">
-																				<FileText className="h-5 w-5 text-blue-400 mb-1" />
-																				<span className="text-[9px] text-slate-400 truncate max-w-full">
-																					{
+
+														{!isVkPost && (
+															<button
+																onClick={(
+																	e,
+																) => {
+																	e.stopPropagation();
+																	handleLoadPostToEditor(
+																		post,
+																	);
+																}}
+																className="px-3 py-1.5 rounded-lg bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/30 text-xs font-semibold flex items-center gap-1.5 transition-colors"
+																title="Загрузить пост в левый блок для редактирования"
+															>
+																<Edit3 className="h-3.5 w-3.5" />
+																<span>
+																	В редактор
+																</span>
+															</button>
+														)}
+
+														{isVkPost && (
+															<button
+																onClick={(
+																	e,
+																) => {
+																	e.stopPropagation();
+																	setRevertModalPost(
+																		post,
+																	);
+																}}
+																className="px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 text-xs font-semibold flex items-center gap-1.5 transition-colors"
+																title="Отозвать пост из ВК обратно в локальную очередь"
+															>
+																<Undo2 className="h-3.5 w-3.5" />
+																<span>
+																	Вернуть в
+																	локальную
+																	очередь
+																</span>
+															</button>
+														)}
+
+														{activeQueueTab ===
+															"local" && (
+															<>
+																<button
+																	onClick={(
+																		e,
+																	) => {
+																		e.stopPropagation();
+																		handleRescheduleNextSlot(
+																			post.id,
+																		);
+																	}}
+																	className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-750 text-slate-200 border border-slate-700 text-xs font-medium flex items-center gap-1.5 transition-colors"
+																	title="Занять следующий доступный слот по расписанию"
+																>
+																	<RotateCcw className="h-3.5 w-3.5" />
+																	<span>
+																		Следующий
+																		слот
+																	</span>
+																</button>
+																<button
+																	onClick={(
+																		e,
+																	) => {
+																		e.stopPropagation();
+																		openRescheduleModal(
+																			post,
+																		);
+																	}}
+																	className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-750 text-slate-200 border border-slate-700 text-xs font-medium flex items-center gap-1.5 transition-colors"
+																	title="Выбрать точную дату и время вручную"
+																>
+																	<Calendar className="h-3.5 w-3.5 text-blue-400" />
+																	<span>
+																		Задать
+																		время
+																	</span>
+																</button>
+															</>
+														)}
+													</div>
+
+													{post.attachments &&
+													post.attachments.length >
+														0 ? (
+														<div>
+															<span className="text-[11px] font-semibold text-slate-400 block mb-2">
+																Прикрепленные
+																вложения:
+															</span>
+															<div className="grid grid-cols-4 gap-2">
+																{post.attachments.map(
+																	(
+																		att,
+																		attIdx,
+																	) => (
+																		<div
+																			key={
+																				attIdx
+																			}
+																			onClick={() =>
+																				att.thumb_data &&
+																				setFullViewImage(
+																					att.thumb_data,
+																				)
+																			}
+																			className={`h-20 rounded-lg bg-slate-900 border border-slate-800 flex flex-col items-center justify-center overflow-hidden p-1 relative ${
+																				att.thumb_data
+																					? "cursor-pointer hover:border-slate-600"
+																					: ""
+																			}`}
+																		>
+																			{att.thumb_data ? (
+																				<img
+																					src={
+																						att.thumb_data
+																					}
+																					alt={
 																						att.file_name
 																					}
-																				</span>
-																			</div>
-																		)}
-																	</div>
-																),
-															)}
+																					className="h-full w-full object-cover rounded"
+																				/>
+																			) : (
+																				<div className="flex flex-col items-center p-1 text-center">
+																					<FileText className="h-5 w-5 text-blue-400 mb-1" />
+																					<span className="text-[9px] text-slate-400 truncate max-w-full">
+																						{
+																							att.file_name
+																						}
+																					</span>
+																				</div>
+																			)}
+																		</div>
+																	),
+																)}
+															</div>
 														</div>
-													</div>
-												) : (
-													<span className="text-[11px] text-slate-500 italic">
-														Вложений нет
-													</span>
-												)}
-											</div>
-										)}
-									</div>
-								);
-							})
-						)}
-					</div>
+													) : (
+														<span className="text-[11px] text-slate-500 italic">
+															Вложений нет
+														</span>
+													)}
+												</div>
+											)}
+										</div>
+									);
+								})
+							)}
+						</div>
+					)}
 				</section>
 			</main>
+
+			{/* Модальное окно пакетной генерации постов */}
+			{showBatchModal && (
+				<div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-150">
+					<div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md p-6 shadow-2xl">
+						<div className="flex items-center justify-between mb-4">
+							<div className="flex items-center gap-2 text-amber-400">
+								<Layers3 className="h-5 w-5" />
+								<h3 className="font-semibold text-sm text-slate-100">
+									Пакетная генерация очереди
+								</h3>
+							</div>
+							<button
+								onClick={() => setShowBatchModal(false)}
+								className="text-slate-400 hover:text-slate-200"
+							>
+								<X className="h-5 w-5" />
+							</button>
+						</div>
+
+						<p className="text-xs text-slate-300 mb-4 leading-relaxed">
+							Вы выбрали <strong>{attachedFiles.length}</strong>{" "}
+							изображений. Выберите, как распределить их по слотам
+							расписания:
+						</p>
+
+						<div className="space-y-2 mb-5">
+							{[
+								{
+									size: 1,
+									label: `По 1 фото на пост (${attachedFiles.length} постов)`,
+								},
+								{
+									size: 2,
+									label: `По 2 фото на пост (${Math.ceil(attachedFiles.length / 2)} постов)`,
+								},
+								{
+									size: 4,
+									label: `По 4 фото на пост (${Math.ceil(attachedFiles.length / 4)} постов)`,
+								},
+							].map((opt) => (
+								<button
+									key={opt.size}
+									onClick={() => setBatchChunkSize(opt.size)}
+									className={`w-full flex items-center justify-between p-3 rounded-xl border text-xs font-semibold transition-all ${
+										batchChunkSize === opt.size
+											? "bg-amber-500/20 border-amber-500/40 text-amber-300"
+											: "bg-slate-800 border-slate-700 text-slate-200 hover:bg-slate-750"
+									}`}
+								>
+									<span>{opt.label}</span>
+									{batchChunkSize === opt.size && (
+										<CheckCircle2 className="h-4 w-4 text-amber-400" />
+									)}
+								</button>
+							))}
+						</div>
+
+						<div className="flex justify-end gap-2.5">
+							<button
+								onClick={() => setShowBatchModal(false)}
+								className="px-4 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-slate-200"
+							>
+								Отмена
+							</button>
+							<button
+								onClick={handleBatchCreate}
+								disabled={isBatchCreating}
+								className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-semibold shadow-md transition-colors"
+							>
+								{isBatchCreating
+									? "Создание..."
+									: "Сформировать очередь"}
+							</button>
+						</div>
+					</div>
+				</div>
+			)}
 
 			{/* Модальное окно возврата поста из ВК в локальную очередь */}
 			{revertModalPost && (
@@ -1900,9 +2346,8 @@ export default function App() {
 						</div>
 
 						<p className="text-xs text-slate-300 mb-5 leading-relaxed">
-							Пост будет удален из отложки ВКонтакте и вернется в
-							список локальной очереди для редактирования и
-							повторной отправки. Выберите время публикации:
+							Пост будет удален со стены ВКонтакте и вернется в
+							список локальной очереди. Выберите время публикации:
 						</p>
 
 						<div className="space-y-2.5">
@@ -2131,10 +2576,7 @@ export default function App() {
 								</h3>
 							</div>
 							<button
-								onClick={() => {
-									setIsAutoListeningClipboard(false);
-									setShowTokenModal(false);
-								}}
+								onClick={() => setShowTokenModal(false)}
 								className="text-slate-400 hover:text-slate-200"
 							>
 								<X className="h-5 w-5" />
@@ -2143,11 +2585,14 @@ export default function App() {
 
 						<div className="space-y-4">
 							<div className="p-3.5 bg-blue-600/10 border border-blue-500/30 rounded-xl text-xs text-blue-300 leading-relaxed">
-								Откройте страницу входа, нажмите{" "}
-								<strong>«Разрешить»</strong>, затем скопируйте
-								адресную строку (Ctrl+C). Приложение
-								автоматически распознает ссылку или нажмите
-								кнопку «Вставить».
+								1. Нажмите синюю кнопку ниже, чтобы открыть
+								страницу ВК в браузере.
+								<br />
+								2. Нажмите <strong>«Разрешить»</strong> и
+								скопируйте ссылку из адресной строки.
+								<br />
+								3. Вставьте ссылку в поле ниже (токен извлечётся
+								сам) и нажмите <strong>«Подтвердить»</strong>.
 							</div>
 
 							<div className="flex gap-2">
@@ -2169,19 +2614,10 @@ export default function App() {
 								</button>
 							</div>
 
-							{isAutoListeningClipboard && (
-								<div className="flex items-center gap-2 text-[11px] text-blue-400">
-									<RefreshCw className="h-3 w-3 animate-spin" />
-									<span>
-										Ожидание копирования адресной строки из
-										браузера...
-									</span>
-								</div>
-							)}
-
 							<div>
 								<label className="block text-[11px] font-medium text-slate-400 mb-1.5">
-									Токен или ссылка из адресной строки:
+									Токен или скопированная ссылка из адресной
+									строки:
 								</label>
 								<textarea
 									rows={2}
@@ -2199,10 +2635,7 @@ export default function App() {
 
 						<div className="mt-6 flex justify-end gap-3">
 							<button
-								onClick={() => {
-									setIsAutoListeningClipboard(false);
-									setShowTokenModal(false);
-								}}
+								onClick={() => setShowTokenModal(false)}
 								className="px-4 py-2 text-xs font-medium text-slate-400 hover:text-slate-200"
 							>
 								Отмена
@@ -2214,16 +2647,14 @@ export default function App() {
 								}
 								className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold disabled:opacity-50 transition-colors shadow-md"
 							>
-								{isAddingToken
-									? "Проверка..."
-									: "Сохранить токен"}
+								{isAddingToken ? "Проверка..." : "Подтвердить"}
 							</button>
 						</div>
 					</div>
 				</div>
 			)}
 
-			{/* Модальное окно создания паттерна */}
+			{/* Модальное окно создания паттерна с интервалом в днях */}
 			{showPatternModal && (
 				<div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
 					<div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md p-6 shadow-2xl">
@@ -2246,7 +2677,7 @@ export default function App() {
 								</label>
 								<input
 									type="text"
-									placeholder="Например: 4 раза в день"
+									placeholder="Например: 1 пост раз в 3 дня"
 									className="w-full rounded-xl bg-slate-800 px-3.5 py-2 text-sm border border-slate-700 focus:outline-none focus:border-blue-500"
 									value={newPatternName}
 									onChange={(e) =>
@@ -2261,13 +2692,36 @@ export default function App() {
 								</label>
 								<input
 									type="text"
-									placeholder="10:00, 14:00, 18:00, 21:00"
+									placeholder="14:00, 18:00, 21:00"
 									className="w-full rounded-xl bg-slate-800 px-3.5 py-2 text-sm border border-slate-700 focus:outline-none focus:border-blue-500 font-mono"
 									value={newPatternTimes}
 									onChange={(e) =>
 										setNewPatternTimes(e.target.value)
 									}
 								/>
+							</div>
+
+							<div>
+								<label className="block text-xs font-medium text-slate-400 mb-1.5">
+									Интервал в днях (1 = каждый день, 2 = через
+									день, 3 = раз в 3 дня)
+								</label>
+								<input
+									type="number"
+									min={1}
+									max={30}
+									className="w-full rounded-xl bg-slate-800 px-3.5 py-2 text-sm border border-slate-700 focus:outline-none focus:border-blue-500 font-mono"
+									value={newPatternIntervalDays}
+									onChange={(e) =>
+										setNewPatternIntervalDays(
+											Math.max(1, Number(e.target.value)),
+										)
+									}
+								/>
+								<p className="text-[11px] text-slate-500 mt-1">
+									Следующий пост будет запланирован через
+									указанное количество дней.
+								</p>
 							</div>
 						</div>
 

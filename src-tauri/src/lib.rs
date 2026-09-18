@@ -9,7 +9,7 @@ use sqlx::{sqlite::SqlitePoolOptions, Row, SqlitePool};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Manager, State, WindowEvent};
 use tokio::sync::Mutex;
 use vk::client::{TokenOwner, VkClient};
 
@@ -40,6 +40,7 @@ pub struct PatternDto {
     pub name: String,
     pub timezone: String,
     pub times_json: String,
+    pub interval_days: i64,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -61,6 +62,10 @@ pub struct PostDto {
     pub error_message: Option<String>,
     pub attachments_count: i64,
     pub attachments_view_mode: String,
+    pub signed: bool,
+    pub close_comments: bool,
+    pub mute_notifications: bool,
+    pub mark_as_ads: bool,
     pub attachments: Vec<AttachmentDto>,
 }
 
@@ -134,6 +139,40 @@ fn cleanup_old_thumbnails(thumbs_dir: &PathBuf) {
             }
         }
     }
+}
+
+pub fn make_db_backup(app: &AppHandle) -> Result<PathBuf, String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let db_path = app_dir.join("studio.sqlite");
+    if !db_path.exists() {
+        return Ok(db_path);
+    }
+    let backups_dir = app_dir.join("backups");
+    std::fs::create_dir_all(&backups_dir).map_err(|e| e.to_string())?;
+
+    let now_str = chrono::Local::now().format("%Y-%m-%d_%H-%M-%S").to_string();
+    let target_file = backups_dir.join(format!("studio_backup_{}.sqlite", now_str));
+
+    std::fs::copy(&db_path, &target_file).map_err(|e| e.to_string())?;
+
+    if let Ok(entries) = std::fs::read_dir(&backups_dir) {
+        let mut list: Vec<_> = entries.flatten().collect();
+        list.sort_by_key(|e| e.metadata().and_then(|m| m.modified()).unwrap_or(SystemTime::UNIX_EPOCH));
+        while list.len() > 10 {
+            if let Some(old) = list.first() {
+                let _ = std::fs::remove_file(old.path());
+            }
+            list.remove(0);
+        }
+    }
+
+    Ok(target_file)
+}
+
+#[tauri::command]
+async fn backup_database(app: AppHandle) -> Result<String, String> {
+    let p = make_db_backup(&app)?;
+    Ok(p.to_string_lossy().to_string())
 }
 
 #[tauri::command]
@@ -282,74 +321,162 @@ async fn add_token(raw_token: String, state: State<'_, AppState>) -> Result<Acco
     let client = VkClient::new(clean_token.clone());
     let owner = client.verify_token().await.map_err(|e| e.to_string())?;
 
+    let today_str = chrono::Local::now().format("%d/%m/%Y").to_string();
+
+    let (raw_user_id, base_title) = match &owner {
+        TokenOwner::User { id, name } => (*id, name.clone()),
+        TokenOwner::Group { id, name, .. } => (-id, format!("Паблик: {}", name)),
+    };
+
+    let display_token_name = format!("{} - {}", base_title, today_str);
+
     let mut tx = state.db.begin().await.map_err(|e| e.to_string())?;
 
-    sqlx::query("UPDATE accounts SET is_active = 0")
-        .execute(&mut *tx)
+    // 1. Проверяем, есть ли уже токен для этой страницы VK по user_id
+    let existing_acc = sqlx::query("SELECT id FROM accounts WHERE user_id = ? ORDER BY id ASC LIMIT 1")
+        .bind(raw_user_id)
+        .fetch_optional(&mut *tx)
         .await
         .map_err(|e| e.to_string())?;
 
-    let (account_id, name, user_id) = match owner {
-        TokenOwner::User { id, name } => {
-            let acc_id = sqlx::query(
+    let account_id = match existing_acc {
+        Some(row) => {
+            let acc_id: i64 = row.get("id");
+            // Деактивируем все, а этот делаем активным и обновляем его токен и имя с новой датой
+            sqlx::query("UPDATE accounts SET is_active = 0").execute(&mut *tx).await.map_err(|e| e.to_string())?;
+            sqlx::query("UPDATE accounts SET name = ?, token = ?, is_active = 1 WHERE id = ?")
+                .bind(&display_token_name)
+                .bind(&clean_token)
+                .bind(acc_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| e.to_string())?;
+
+            // Если были созданы лишние дубликаты аккаунта с тем же user_id — удаляем их
+            let dupes = sqlx::query("SELECT id FROM accounts WHERE user_id = ? AND id != ?")
+                .bind(raw_user_id)
+                .bind(acc_id)
+                .fetch_all(&mut *tx)
+                .await
+                .unwrap_or_default();
+
+            for d in dupes {
+                let d_id: i64 = d.get("id");
+                let _ = sqlx::query("UPDATE posts SET account_id = ? WHERE account_id = ?")
+                    .bind(acc_id)
+                    .bind(d_id)
+                    .execute(&mut *tx)
+                    .await;
+                let _ = sqlx::query("DELETE FROM targets WHERE account_id = ?")
+                    .bind(d_id)
+                    .execute(&mut *tx)
+                    .await;
+                let _ = sqlx::query("DELETE FROM accounts WHERE id = ?")
+                    .bind(d_id)
+                    .execute(&mut *tx)
+                    .await;
+            }
+
+            acc_id
+        }
+        None => {
+            sqlx::query("UPDATE accounts SET is_active = 0").execute(&mut *tx).await.map_err(|e| e.to_string())?;
+            sqlx::query(
                 "INSERT INTO accounts (name, user_id, token, is_active) VALUES (?, ?, ?, 1) RETURNING id"
             )
-            .bind(&name)
-            .bind(id)
+            .bind(&display_token_name)
+            .bind(raw_user_id)
             .bind(&clean_token)
             .fetch_one(&mut *tx)
             .await
             .map_err(|e| e.to_string())?
-            .get::<i64, _>("id");
+            .get::<i64, _>("id")
+        }
+    };
 
-            sqlx::query("INSERT INTO targets (account_id, target_type, owner_id, title) VALUES (?, 'user', ?, ?)")
-                .bind(acc_id)
+    // 2. Синхронизируем цели: обновляем существующие (чтобы их id не менялись и история постов сохранялась!)
+    match &owner {
+        TokenOwner::User { id, name } => {
+            let profile_title = format!("Мой профиль ({})", name);
+            let exists = sqlx::query("SELECT id FROM targets WHERE account_id = ? AND owner_id = ?")
+                .bind(account_id)
                 .bind(id)
-                .bind(format!("Мой профиль ({})", name))
-                .execute(&mut *tx)
+                .fetch_optional(&mut *tx)
                 .await
                 .map_err(|e| e.to_string())?;
+
+            if let Some(r) = exists {
+                let tid: i64 = r.get("id");
+                let _ = sqlx::query("UPDATE targets SET title = ? WHERE id = ?")
+                    .bind(&profile_title)
+                    .bind(tid)
+                    .execute(&mut *tx)
+                    .await;
+            } else {
+                let _ = sqlx::query("INSERT INTO targets (account_id, target_type, owner_id, title) VALUES (?, 'user', ?, ?)")
+                    .bind(account_id)
+                    .bind(id)
+                    .bind(&profile_title)
+                    .execute(&mut *tx)
+                    .await;
+            }
 
             if let Ok(groups) = client.get_admin_groups().await {
                 for (owner_id, group_title, photo) in groups {
-                    sqlx::query("INSERT INTO targets (account_id, target_type, owner_id, title, photo_url) VALUES (?, 'community', ?, ?, ?)")
-                        .bind(acc_id)
+                    let g_exists = sqlx::query("SELECT id FROM targets WHERE account_id = ? AND owner_id = ?")
+                        .bind(account_id)
                         .bind(owner_id)
-                        .bind(group_title)
-                        .bind(photo)
-                        .execute(&mut *tx)
+                        .fetch_optional(&mut *tx)
                         .await
-                        .ok();
+                        .unwrap_or(None);
+
+                    if let Some(r) = g_exists {
+                        let tid: i64 = r.get("id");
+                        let _ = sqlx::query("UPDATE targets SET title = ?, photo_url = ? WHERE id = ?")
+                            .bind(&group_title)
+                            .bind(&photo)
+                            .bind(tid)
+                            .execute(&mut *tx)
+                            .await;
+                    } else {
+                        let _ = sqlx::query("INSERT INTO targets (account_id, target_type, owner_id, title, photo_url) VALUES (?, 'community', ?, ?, ?)")
+                            .bind(account_id)
+                            .bind(owner_id)
+                            .bind(&group_title)
+                            .bind(&photo)
+                            .execute(&mut *tx)
+                            .await;
+                    }
                 }
             }
-
-            (acc_id, name, id)
         }
         TokenOwner::Group { id, name, photo_100 } => {
-            let display_name = format!("Паблик: {}", name);
-            let acc_id = sqlx::query(
-                "INSERT INTO accounts (name, user_id, token, is_active) VALUES (?, ?, ?, 1) RETURNING id"
-            )
-            .bind(&display_name)
-            .bind(-id)
-            .bind(&clean_token)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(|e| e.to_string())?
-            .get::<i64, _>("id");
-
-            sqlx::query("INSERT INTO targets (account_id, target_type, owner_id, title, photo_url) VALUES (?, 'community', ?, ?, ?)")
-                .bind(acc_id)
+            let g_exists = sqlx::query("SELECT id FROM targets WHERE account_id = ? AND owner_id = ?")
+                .bind(account_id)
                 .bind(-id)
-                .bind(&name)
-                .bind(photo_100)
-                .execute(&mut *tx)
+                .fetch_optional(&mut *tx)
                 .await
-                .map_err(|e| e.to_string())?;
+                .unwrap_or(None);
 
-            (acc_id, display_name, -id)
+            if let Some(r) = g_exists {
+                let tid: i64 = r.get("id");
+                let _ = sqlx::query("UPDATE targets SET title = ?, photo_url = ? WHERE id = ?")
+                    .bind(name)
+                    .bind(photo_100)
+                    .bind(tid)
+                    .execute(&mut *tx)
+                    .await;
+            } else {
+                let _ = sqlx::query("INSERT INTO targets (account_id, target_type, owner_id, title, photo_url) VALUES (?, 'community', ?, ?, ?)")
+                    .bind(account_id)
+                    .bind(-id)
+                    .bind(name)
+                    .bind(photo_100)
+                    .execute(&mut *tx)
+                    .await;
+            }
         }
-    };
+    }
 
     tx.commit().await.map_err(|e| e.to_string())?;
 
@@ -358,8 +485,8 @@ async fn add_token(raw_token: String, state: State<'_, AppState>) -> Result<Acco
 
     Ok(AccountDto {
         id: account_id,
-        name,
-        user_id,
+        name: display_token_name,
+        user_id: raw_user_id,
         is_active: true,
     })
 }
@@ -397,7 +524,7 @@ async fn get_targets(account_id: Option<i64>, state: State<'_, AppState>) -> Res
 
 #[tauri::command]
 async fn get_patterns(state: State<'_, AppState>) -> Result<Vec<PatternDto>, String> {
-    let rows = sqlx::query("SELECT id, name, timezone, times_json FROM patterns ORDER BY id ASC")
+    let rows = sqlx::query("SELECT id, name, timezone, times_json, interval_days FROM patterns ORDER BY id ASC")
         .fetch_all(&state.db)
         .await
         .map_err(|e| e.to_string())?;
@@ -409,6 +536,7 @@ async fn get_patterns(state: State<'_, AppState>) -> Result<Vec<PatternDto>, Str
             name: r.get("name"),
             timezone: r.get("timezone"),
             times_json: r.get("times_json"),
+            interval_days: r.try_get("interval_days").unwrap_or(1),
         })
         .collect())
 }
@@ -418,6 +546,7 @@ async fn create_pattern(
     name: String,
     times: Vec<String>,
     timezone: String,
+    interval_days: i64,
     state: State<'_, AppState>,
 ) -> Result<PatternDto, String> {
     if times.is_empty() {
@@ -426,15 +555,17 @@ async fn create_pattern(
 
     let times_json = serde_json::to_string(&times).map_err(|e| e.to_string())?;
     let days_json = "[\"mon\",\"tue\",\"wed\",\"thu\",\"fri\",\"sat\",\"sun\"]".to_string();
+    let step_days = interval_days.max(1);
 
     let id = sqlx::query(
-        "INSERT INTO patterns (name, timezone, times_json, days_json, min_interval_minutes) 
-         VALUES (?, ?, ?, ?, 30) RETURNING id"
+        "INSERT INTO patterns (name, timezone, times_json, days_json, min_interval_minutes, interval_days) 
+         VALUES (?, ?, ?, ?, 30, ?) RETURNING id"
     )
     .bind(&name)
     .bind(&timezone)
     .bind(&times_json)
     .bind(&days_json)
+    .bind(step_days)
     .fetch_one(&state.db)
     .await
     .map_err(|e| e.to_string())?
@@ -445,7 +576,25 @@ async fn create_pattern(
         name,
         timezone,
         times_json,
+        interval_days: step_days,
     })
+}
+
+fn map_post_row(r: &sqlx::sqlite::SqliteRow, attachments: Vec<AttachmentDto>) -> PostDto {
+    PostDto {
+        id: r.get("id"),
+        text: r.get("text"),
+        scheduled_at_utc: r.get("scheduled_at_utc"),
+        status: r.get("status"),
+        error_message: r.get("error_message"),
+        attachments_count: attachments.len() as i64,
+        attachments_view_mode: r.try_get("attachments_view_mode").unwrap_or_else(|_| "grid".to_string()),
+        signed: r.try_get::<i64, _>("signed").unwrap_or(0) == 1,
+        close_comments: r.try_get::<i64, _>("close_comments").unwrap_or(0) == 1,
+        mute_notifications: r.try_get::<i64, _>("mute_notifications").unwrap_or(0) == 1,
+        mark_as_ads: r.try_get::<i64, _>("mark_as_ads").unwrap_or(0) == 1,
+        attachments,
+    }
 }
 
 #[tauri::command]
@@ -455,7 +604,9 @@ async fn get_queue(
     state: State<'_, AppState>,
 ) -> Result<Vec<PostDto>, String> {
     let posts_rows = sqlx::query(
-        "SELECT id, text, scheduled_at_utc, status, error_message, attachments_view_mode FROM posts 
+        "SELECT id, text, scheduled_at_utc, status, error_message, attachments_view_mode,
+                signed, close_comments, mute_notifications, mark_as_ads 
+         FROM posts 
          WHERE target_id = ? AND status != 'archived' 
          ORDER BY scheduled_at_utc ASC"
     )
@@ -507,18 +658,7 @@ async fn get_queue(
             });
         }
 
-        let mode: String = r.try_get("attachments_view_mode").unwrap_or_else(|_| "grid".to_string());
-
-        result.push(PostDto {
-            id: post_id,
-            text: r.get("text"),
-            scheduled_at_utc: r.get("scheduled_at_utc"),
-            status: r.get("status"),
-            error_message: r.get("error_message"),
-            attachments_count: attachments.len() as i64,
-            attachments_view_mode: mode,
-            attachments,
-        });
+        result.push(map_post_row(&r, attachments));
     }
 
     Ok(result)
@@ -531,7 +671,9 @@ async fn get_post_history(
     state: State<'_, AppState>,
 ) -> Result<Vec<PostDto>, String> {
     let posts_rows = sqlx::query(
-        "SELECT id, text, scheduled_at_utc, status, error_message, attachments_view_mode FROM posts 
+        "SELECT id, text, scheduled_at_utc, status, error_message, attachments_view_mode,
+                signed, close_comments, mute_notifications, mark_as_ads 
+         FROM posts 
          WHERE target_id = ? 
          ORDER BY id DESC"
     )
@@ -583,18 +725,7 @@ async fn get_post_history(
             });
         }
 
-        let mode: String = r.try_get("attachments_view_mode").unwrap_or_else(|_| "grid".to_string());
-
-        result.push(PostDto {
-            id: post_id,
-            text: r.get("text"),
-            scheduled_at_utc: r.get("scheduled_at_utc"),
-            status: r.get("status"),
-            error_message: r.get("error_message"),
-            attachments_count: attachments.len() as i64,
-            attachments_view_mode: mode,
-            attachments,
-        });
+        result.push(map_post_row(&r, attachments));
     }
 
     Ok(result)
@@ -740,11 +871,14 @@ async fn get_next_slot_preview(
         .await
         .map_err(|e| e.to_string())?;
 
+    let interval_days: i64 = pattern_row.try_get("interval_days").unwrap_or(1);
+
     let engine = PatternEngine::from_config(&PatternConfig {
         timezone: pattern_row.get("timezone"),
         times: serde_json::from_str(&pattern_row.get::<String, _>("times_json")).unwrap_or_default(),
         days: serde_json::from_str(&pattern_row.get::<String, _>("days_json")).unwrap_or_default(),
         min_interval_minutes: pattern_row.get("min_interval_minutes"),
+        interval_days: Some(interval_days),
     })
     .map_err(|e| e.to_string())?;
 
@@ -792,11 +926,14 @@ async fn reschedule_post_next_slot(
         .await
         .map_err(|e| e.to_string())?;
 
+    let interval_days: i64 = pattern_row.try_get("interval_days").unwrap_or(1);
+
     let engine = PatternEngine::from_config(&PatternConfig {
         timezone: pattern_row.get("timezone"),
         times: serde_json::from_str(&pattern_row.get::<String, _>("times_json")).unwrap_or_default(),
         days: serde_json::from_str(&pattern_row.get::<String, _>("days_json")).unwrap_or_default(),
         min_interval_minutes: pattern_row.get("min_interval_minutes"),
+        interval_days: Some(interval_days),
     })
     .map_err(|e| e.to_string())?;
 
@@ -857,7 +994,6 @@ async fn reschedule_post_custom(
     Ok(())
 }
 
-// 1. Вернуть пост из ВК в локальную очередь на ТО ЖЕ время
 #[tauri::command]
 async fn revert_vk_post_to_local_same_time(post_id: i64, state: State<'_, AppState>) -> Result<(), String> {
     let post = sqlx::query("SELECT target_id, vk_post_id FROM posts WHERE id = ?")
@@ -900,7 +1036,6 @@ async fn revert_vk_post_to_local_same_time(post_id: i64, state: State<'_, AppSta
     Ok(())
 }
 
-// 2. Вернуть пост из ВК в локальную очередь на СЛЕДУЮЩИЙ слот по паттерну
 #[tauri::command]
 async fn revert_vk_post_to_local_next_slot(
     post_id: i64,
@@ -1019,6 +1154,151 @@ async fn delete_history_post(post_id: i64, state: State<'_, AppState>) -> Result
 }
 
 #[tauri::command]
+async fn update_post(
+    post_id: i64,
+    text: String,
+    signed: bool,
+    close_comments: bool,
+    mute_notifications: bool,
+    mark_as_ads: bool,
+    attachments_view_mode: String,
+    file_paths: Vec<String>,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let mut tx = state.db.begin().await.map_err(|e| e.to_string())?;
+
+    sqlx::query(
+        "UPDATE posts SET text = ?, signed = ?, close_comments = ?, mute_notifications = ?, mark_as_ads = ?, attachments_view_mode = ? WHERE id = ?"
+    )
+    .bind(&text)
+    .bind(if signed { 1 } else { 0 })
+    .bind(if close_comments { 1 } else { 0 })
+    .bind(if mute_notifications { 1 } else { 0 })
+    .bind(if mark_as_ads { 1 } else { 0 })
+    .bind(&attachments_view_mode)
+    .bind(post_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    if !file_paths.is_empty() {
+        sqlx::query("DELETE FROM attachments WHERE post_id = ?")
+            .bind(post_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let thumbs_dir = get_thumbs_dir(&app);
+        for (idx, path_str) in file_paths.iter().enumerate() {
+            let p = std::path::Path::new(path_str);
+            let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("file");
+            let size = std::fs::metadata(p).map(|m| m.len() as i64).unwrap_or(0);
+
+            let att_id = sqlx::query(
+                "INSERT INTO attachments (post_id, local_path, file_name, size_bytes, attachment_kind, order_index)
+                 VALUES (?, ?, ?, ?, 'photo', ?) RETURNING id"
+            )
+            .bind(post_id)
+            .bind(path_str)
+            .bind(name)
+            .bind(size)
+            .bind(idx as i32)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?
+            .get::<i64, _>("id");
+
+            if let Ok(b64) = get_file_preview_base64(path_str.clone()).await {
+                let thumb_path = thumbs_dir.join(format!("{}.thumb", att_id));
+                let _ = std::fs::write(&thumb_path, b64);
+            }
+        }
+    }
+
+    tx.commit().await.map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn clean_uploaded_local_files(
+    target_id: i64,
+    state: State<'_, AppState>,
+) -> Result<i64, String> {
+    let rows = sqlx::query(
+        "SELECT a.id, a.local_path 
+         FROM attachments a 
+         JOIN posts p ON a.post_id = p.id 
+         WHERE p.target_id = ? AND p.status = 'transferred_to_vk' AND a.local_path IS NOT NULL"
+    )
+    .bind(target_id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let mut deleted_count = 0;
+    for r in rows {
+        let att_id: i64 = r.get("id");
+        let path_str: String = r.get("local_path");
+        let path = std::path::Path::new(&path_str);
+        if path.exists() {
+            if let Ok(_) = tokio::fs::remove_file(path).await {
+                deleted_count += 1;
+            }
+        }
+        let _ = sqlx::query("UPDATE attachments SET local_path = NULL WHERE id = ?")
+            .bind(att_id)
+            .execute(&state.db)
+            .await;
+    }
+
+    Ok(deleted_count)
+}
+
+#[tauri::command]
+async fn batch_create_posts(
+    target_id: i64,
+    pattern_id: i64,
+    file_paths: Vec<String>,
+    items_per_post: usize,
+    text: String,
+    signed: bool,
+    close_comments: bool,
+    mute_notifications: bool,
+    mark_as_ads: bool,
+    attachments_view_mode: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<usize, String> {
+    if file_paths.is_empty() || items_per_post == 0 {
+        return Ok(0);
+    }
+
+    let chunks: Vec<Vec<String>> = file_paths.chunks(items_per_post).map(|c| c.to_vec()).collect();
+    let total_posts = chunks.len();
+
+    for chunk in chunks {
+        let _ = add_post_to_queue(
+            target_id,
+            pattern_id,
+            text.clone(),
+            signed,
+            close_comments,
+            mute_notifications,
+            mark_as_ads,
+            attachments_view_mode.clone(),
+            None,
+            chunk,
+            app.clone(),
+            state.clone(),
+        )
+        .await?;
+    }
+
+    Ok(total_posts)
+}
+
+#[tauri::command]
 async fn add_post_to_queue(
     target_id: i64,
     pattern_id: i64,
@@ -1053,11 +1333,14 @@ async fn add_post_to_queue(
             .await
             .map_err(|e| e.to_string())?;
 
+        let interval_days: i64 = pattern_row.try_get("interval_days").unwrap_or(1);
+
         let engine = PatternEngine::from_config(&PatternConfig {
             timezone: pattern_row.get("timezone"),
             times: serde_json::from_str(&pattern_row.get::<String, _>("times_json")).unwrap_or_default(),
             days: serde_json::from_str(&pattern_row.get::<String, _>("days_json")).unwrap_or_default(),
             min_interval_minutes: pattern_row.get("min_interval_minutes"),
+            interval_days: Some(interval_days),
         })
         .map_err(|e| e.to_string())?;
 
@@ -1172,6 +1455,11 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { .. } = event {
+                let _ = make_db_backup(window.app_handle());
+            }
+        })
         .setup(|app| {
             let app_handle = app.handle().clone();
             tauri::async_runtime::block_on(async move {
@@ -1210,10 +1498,77 @@ pub fn run() {
                 let _ = sqlx::query("ALTER TABLE posts ADD COLUMN mute_notifications INTEGER NOT NULL DEFAULT 0").execute(&pool).await;
                 let _ = sqlx::query("ALTER TABLE posts ADD COLUMN mark_as_ads INTEGER NOT NULL DEFAULT 0").execute(&pool).await;
                 let _ = sqlx::query("ALTER TABLE posts ADD COLUMN attachments_view_mode TEXT NOT NULL DEFAULT 'grid'").execute(&pool).await;
+                let _ = sqlx::query("ALTER TABLE patterns ADD COLUMN interval_days INTEGER NOT NULL DEFAULT 1").execute(&pool).await;
+
+                // Автоматическое слияние накопившихся дубликатов токенов с одинаковым user_id
+                let duplicate_accs = sqlx::query(
+                    "SELECT a1.id as dup_id, a2.id as keep_id 
+                     FROM accounts a1 
+                     JOIN accounts a2 ON a1.user_id = a2.user_id 
+                     WHERE a1.id > a2.id"
+                )
+                .fetch_all(&pool)
+                .await
+                .unwrap_or_default();
+
+                for row in duplicate_accs {
+                    let dup_id: i64 = row.get("dup_id");
+                    let keep_id: i64 = row.get("keep_id");
+
+                    let dup_targets = sqlx::query("SELECT id, owner_id FROM targets WHERE account_id = ?")
+                        .bind(dup_id)
+                        .fetch_all(&pool)
+                        .await
+                        .unwrap_or_default();
+
+                    for dt in dup_targets {
+                        let dt_id: i64 = dt.get("id");
+                        let owner_id: i64 = dt.get("owner_id");
+
+                        let primary_target = sqlx::query("SELECT id FROM targets WHERE account_id = ? AND owner_id = ?")
+                            .bind(keep_id)
+                            .bind(owner_id)
+                            .fetch_optional(&pool)
+                            .await
+                            .ok()
+                            .flatten();
+
+                        if let Some(pt) = primary_target {
+                            let pt_id: i64 = pt.get("id");
+                            let _ = sqlx::query("UPDATE posts SET target_id = ?, account_id = ? WHERE target_id = ?")
+                                .bind(pt_id)
+                                .bind(keep_id)
+                                .bind(dt_id)
+                                .execute(&pool)
+                                .await;
+                            let _ = sqlx::query("DELETE FROM targets WHERE id = ?")
+                                .bind(dt_id)
+                                .execute(&pool)
+                                .await;
+                        } else {
+                            let _ = sqlx::query("UPDATE targets SET account_id = ? WHERE id = ?")
+                                .bind(keep_id)
+                                .bind(dt_id)
+                                .execute(&pool)
+                                .await;
+                        }
+                    }
+
+                    let _ = sqlx::query("UPDATE posts SET account_id = ? WHERE account_id = ?")
+                        .bind(keep_id)
+                        .bind(dup_id)
+                        .execute(&pool)
+                        .await;
+
+                    let _ = sqlx::query("DELETE FROM accounts WHERE id = ?")
+                        .bind(dup_id)
+                        .execute(&pool)
+                        .await;
+                }
 
                 sqlx::query(
-                    "INSERT OR IGNORE INTO patterns (id, name, timezone, times_json, days_json, min_interval_minutes, is_default)
-                     VALUES (1, '3 поста в день (14:00, 18:00, 21:00)', 'Europe/Moscow', '[\"14:00\", \"18:00\", \"21:00\"]', '[\"mon\",\"tue\",\"wed\",\"thu\",\"fri\",\"sat\",\"sun\"]', 30, 1)"
+                    "INSERT OR IGNORE INTO patterns (id, name, timezone, times_json, days_json, min_interval_minutes, interval_days, is_default)
+                     VALUES (1, '3 поста в день (14:00, 18:00, 21:00)', 'Europe/Moscow', '[\"14:00\", \"18:00\", \"21:00\"]', '[\"mon\",\"tue\",\"wed\",\"thu\",\"fri\",\"sat\",\"sun\"]', 30, 1, 1)"
                 )
                 .execute(&pool)
                 .await
@@ -1257,6 +1612,10 @@ pub fn run() {
             delete_local_post,
             delete_vk_post,
             delete_history_post,
+            update_post,
+            clean_uploaded_local_files,
+            batch_create_posts,
+            backup_database,
             add_post_to_queue,
             start_transfer_pipeline
         ])
