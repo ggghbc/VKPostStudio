@@ -67,11 +67,12 @@ fn map_post_row(r: &sqlx::sqlite::SqliteRow, attachments: Vec<AttachmentDto>) ->
 #[tauri::command]
 pub async fn get_queue(target_id: i64, app: AppHandle, state: State<'_, AppState>) -> Result<Vec<PostDto>, String> {
     let posts_rows = sqlx::query(
-        "SELECT id, text, scheduled_at_utc, status, error_message, attachments_view_mode,
-                signed, close_comments, mute_notifications, mark_as_ads 
-         FROM posts 
-         WHERE target_id = ? AND status != 'archived' 
-         ORDER BY scheduled_at_utc ASC"
+        "SELECT p.id, p.text, p.scheduled_at_utc, p.status, p.error_message, p.attachments_view_mode,
+                p.signed, p.close_comments, p.mute_notifications, p.mark_as_ads 
+         FROM posts p
+         JOIN targets t ON p.target_id = t.id
+         WHERE t.owner_id = (SELECT owner_id FROM targets WHERE id = ?) AND p.status != 'archived' 
+         ORDER BY datetime(p.scheduled_at_utc) ASC"
     )
     .bind(target_id)
     .fetch_all(&state.db)
@@ -96,7 +97,6 @@ pub async fn get_queue(target_id: i64, app: AppHandle, state: State<'_, AppState
         for a in att_rows {
             let att_id: i64 = a.get("id");
             let local_path: Option<String> = a.get("local_path");
-
             let thumb_path = thumbs_dir.join(format!("{}.thumb", att_id));
             let thumb_data = if thumb_path.exists() {
                 std::fs::read_to_string(&thumb_path).ok()
@@ -126,11 +126,12 @@ pub async fn get_queue(target_id: i64, app: AppHandle, state: State<'_, AppState
 #[tauri::command]
 pub async fn get_post_history(target_id: i64, app: AppHandle, state: State<'_, AppState>) -> Result<Vec<PostDto>, String> {
     let posts_rows = sqlx::query(
-        "SELECT id, text, scheduled_at_utc, status, error_message, attachments_view_mode,
-                signed, close_comments, mute_notifications, mark_as_ads 
-         FROM posts 
-         WHERE target_id = ? 
-         ORDER BY id DESC"
+        "SELECT p.id, p.text, p.scheduled_at_utc, p.status, p.error_message, p.attachments_view_mode,
+                p.signed, p.close_comments, p.mute_notifications, p.mark_as_ads 
+         FROM posts p
+         JOIN targets t ON p.target_id = t.id
+         WHERE t.owner_id = (SELECT owner_id FROM targets WHERE id = ?)
+         ORDER BY datetime(p.scheduled_at_utc) ASC"
     )
     .bind(target_id)
     .fetch_all(&state.db)
@@ -155,7 +156,6 @@ pub async fn get_post_history(target_id: i64, app: AppHandle, state: State<'_, A
         for a in att_rows {
             let att_id: i64 = a.get("id");
             let local_path: Option<String> = a.get("local_path");
-
             let thumb_path = thumbs_dir.join(format!("{}.thumb", att_id));
             let thumb_data = if thumb_path.exists() {
                 std::fs::read_to_string(&thumb_path).ok()
@@ -498,7 +498,10 @@ pub async fn clean_uploaded_local_files(target_id: i64, state: State<'_, AppStat
         "SELECT a.id, a.local_path 
          FROM attachments a 
          JOIN posts p ON a.post_id = p.id 
-         WHERE p.target_id = ? AND p.status = 'transferred_to_vk' AND a.local_path IS NOT NULL"
+         JOIN targets t ON p.target_id = t.id
+         WHERE t.owner_id = (SELECT owner_id FROM targets WHERE id = ?)
+           AND p.status = 'transferred_to_vk' 
+           AND a.local_path IS NOT NULL"
     )
     .bind(target_id)
     .fetch_all(&state.db)
@@ -593,11 +596,19 @@ pub async fn add_post_to_queue(
             .map(|dt| dt.with_timezone(&chrono::Utc))
             .map_err(|e| format!("Неверный формат времени: {}", e))?
     } else {
-        let pattern_row = sqlx::query("SELECT * FROM patterns WHERE id = ?")
+        let pattern_opt = sqlx::query("SELECT * FROM patterns WHERE id = ?")
             .bind(pattern_id)
-            .fetch_one(db)
+            .fetch_optional(db)
             .await
             .map_err(|e| e.to_string())?;
+
+        let pattern_row = match pattern_opt {
+            Some(row) => row,
+            None => sqlx::query("SELECT * FROM patterns ORDER BY id ASC LIMIT 1")
+                .fetch_one(db)
+                .await
+                .map_err(|e| e.to_string())?,
+        };
 
         let interval_days: i64 = pattern_row.try_get("interval_days").unwrap_or(1);
 
@@ -605,17 +616,17 @@ pub async fn add_post_to_queue(
             timezone: pattern_row.get("timezone"),
             times: serde_json::from_str(&pattern_row.get::<String, _>("times_json")).unwrap_or_default(),
             days: serde_json::from_str(&pattern_row.get::<String, _>("days_json")).unwrap_or_default(),
-            min_interval_minutes: pattern_row.get("min_interval_minutes"),
+            min_interval_minutes: pattern_row.try_get("min_interval_minutes").unwrap_or(30),
             interval_days: Some(interval_days),
         })
         .map_err(|e| e.to_string())?;
 
         let last_post = sqlx::query(
-            "SELECT scheduled_at_utc FROM posts 
-             WHERE target_id = ? 
-               AND status IN ('queued', 'transferred_to_vk') 
-               AND datetime(scheduled_at_utc) > datetime('now')
-             ORDER BY scheduled_at_utc DESC LIMIT 1"
+            "SELECT p.scheduled_at_utc FROM posts p
+             JOIN targets t ON p.target_id = t.id
+             WHERE t.owner_id = (SELECT owner_id FROM targets WHERE id = ?)
+               AND p.status IN ('queued', 'transferred_to_vk')
+             ORDER BY datetime(p.scheduled_at_utc) DESC LIMIT 1"
         )
         .bind(target_id)
         .fetch_optional(db)

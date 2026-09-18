@@ -2,7 +2,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { Account, Target, Pattern, PostItem, SyncResult } from "../types";
 
 export const api = {
-	// Системные и профиль
 	initTimezone: (timezone: string) =>
 		invoke("init_client_timezone", { timezone }),
 	backupDatabase: () => invoke<string>("backup_database"),
@@ -10,7 +9,6 @@ export const api = {
 		invoke<string>("get_file_preview_base64", { path }),
 	openBrowserAuth: () => invoke("open_vk_auth_browser"),
 
-	// Токены и цели
 	getAccounts: () => invoke<Account[]>("get_accounts"),
 	switchAccount: (accountId: number) =>
 		invoke("switch_account", { accountId }),
@@ -21,7 +19,6 @@ export const api = {
 	getTargets: (accountId?: number | null) =>
 		invoke<Target[]>("get_targets", { accountId }),
 
-	// Паттерны
 	getPatterns: () => invoke<Pattern[]>("get_patterns"),
 	createPattern: (
 		name: string,
@@ -35,10 +32,11 @@ export const api = {
 			timezone,
 			intervalDays,
 		}),
+	deletePattern: (patternId: number) =>
+		invoke("delete_pattern", { patternId }),
 	getNextSlot: (targetId: number, patternId: number) =>
 		invoke<string>("get_next_slot_preview", { targetId, patternId }),
 
-	// Очереди и посты
 	getQueue: (targetId: number) =>
 		invoke<PostItem[]>("get_queue", { targetId }),
 	getHistory: (targetId: number) =>
@@ -51,7 +49,6 @@ export const api = {
 	cleanLocalFiles: (targetId: number) =>
 		invoke<number>("clean_uploaded_local_files", { targetId }),
 
-	// Управление статусами
 	rescheduleNextSlot: (postId: number, patternId: number) =>
 		invoke<string>("reschedule_post_next_slot", { postId, patternId }),
 	rescheduleCustom: (postId: number, customTimeUtc: string) =>

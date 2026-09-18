@@ -32,6 +32,7 @@ import {
 } from "date-fns";
 import { ru } from "date-fns/locale";
 import { Pattern, FilePreview } from "../types";
+import { translations, Lang } from "../services/i18n";
 
 interface PostCreatorProps {
 	editingPostId: number | null;
@@ -54,6 +55,8 @@ interface PostCreatorProps {
 	viewMonth: Date;
 	nextSlotDisplay: string;
 	selectedTargetId: number | null;
+	isDraggingOver: boolean;
+	lang: Lang;
 	onTextChange: (text: string) => void;
 	onSelectPattern: (id: number) => void;
 	onOpenPatternModal: () => void;
@@ -99,6 +102,8 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 	viewMonth,
 	nextSlotDisplay,
 	selectedTargetId,
+	isDraggingOver,
+	lang,
 	onTextChange,
 	onSelectPattern,
 	onOpenPatternModal,
@@ -122,6 +127,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 	onCancelEditing,
 	onSavePost,
 }) => {
+	const t = translations[lang];
 	const calendarRef = useRef<HTMLDivElement>(null);
 
 	const monthStart = startOfMonth(viewMonth);
@@ -143,7 +149,10 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 					? "w-1/2"
 					: "w-full max-w-4xl mx-auto border-r-0"
 			}`}
-			style={{ borderColor: "var(--border-app)" }}
+			style={{
+				backgroundColor: "var(--bg-surface)",
+				borderColor: "var(--border-app)",
+			}}
 		>
 			<div className="mb-3 flex items-center justify-between">
 				<div className="flex items-center gap-2">
@@ -152,12 +161,19 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 						style={{ color: "var(--text-app)" }}
 					>
 						{editingPostId
-							? `РЕДАКТИРОВАНИЕ ПОСТА #${editingPostId}`
-							: "СОЗДАНИЕ ЗАПИСИ"}
+							? `${t.editPost} #${editingPostId}`
+							: t.createPost}
 					</h2>
 					{editingPostId && (
-						<span className="px-2 py-0.5 rounded bg-blue-500/20 border border-blue-500/30 text-[10px] font-semibold text-blue-300">
-							Режим правки
+						<span
+							className="px-2 py-0.5 rounded border text-[10px] font-semibold"
+							style={{
+								backgroundColor: "var(--accent-glow)",
+								borderColor: "var(--accent)",
+								color: "var(--accent)",
+							}}
+						>
+							{t.editMode}
 						</span>
 					)}
 				</div>
@@ -166,8 +182,8 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 					<div
 						className="flex items-center gap-1.5 border rounded-lg px-2.5 py-1"
 						style={{
-							backgroundColor: "var(--bg-surface)",
-							borderColor: "var(--border-app)",
+							backgroundColor: "var(--bg-surface-sub)",
+							borderColor: "var(--border-light)",
 						}}
 					>
 						<Clock
@@ -183,11 +199,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 							}
 						>
 							{patterns.map((p) => (
-								<option
-									key={p.id}
-									value={p.id}
-									className="bg-slate-900 text-slate-100"
-								>
+								<option key={p.id} value={p.id}>
 									{p.name}{" "}
 									{p.interval_days > 1
 										? `(раз в ${p.interval_days} дн.)`
@@ -201,8 +213,8 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 						onClick={onOpenPatternModal}
 						className="p-1 rounded-lg border hover:opacity-80 transition-colors"
 						style={{
-							backgroundColor: "var(--bg-surface)",
-							borderColor: "var(--border-app)",
+							backgroundColor: "var(--bg-surface-sub)",
+							borderColor: "var(--border-light)",
 							color: "var(--text-muted)",
 						}}
 						title="Настроить паттерн"
@@ -214,23 +226,23 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 
 			<div className="mb-3">
 				<textarea
-					className="w-full h-16 min-h-[4rem] max-h-32 rounded-xl p-3 text-xs border focus:outline-none focus:border-blue-500 transition-colors resize-none overflow-y-auto leading-relaxed"
+					className="w-full h-16 min-h-[4rem] max-h-32 rounded-xl p-3 text-xs border focus:outline-none transition-colors resize-none overflow-y-auto leading-relaxed"
 					style={{
-						backgroundColor: "var(--bg-surface)",
+						backgroundColor: "var(--bg-surface-sub)",
 						color: "var(--text-app)",
-						borderColor: "var(--border-app)",
+						borderColor: "var(--border-light)",
 					}}
-					placeholder="Текст записи (необязательно)..."
+					placeholder={t.postTextPlaceholder}
 					value={postText}
 					maxLength={15895}
 					onChange={(e) => onTextChange(e.target.value)}
 				/>
 				<div className="flex justify-end mt-1 px-1">
 					<span
-						className={`text-[10px] font-mono ${postText.length > 14000 ? "text-amber-400" : ""}`}
+						className="text-[10px] font-mono"
 						style={{ color: "var(--text-dim)" }}
 					>
-						{postText.length} / 15 895 символов
+						{postText.length} / 15 895 {t.symbols}
 					</span>
 				</div>
 			</div>
@@ -239,15 +251,24 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 				{attachedFiles.length === 0 ? (
 					<div
 						onClick={onSelectFiles}
-						className="flex-1 flex flex-col items-center justify-center border-2 border-dashed rounded-2xl cursor-pointer p-6 hover:opacity-80 transition-all"
+						onDragOver={(e) => e.preventDefault()}
+						onDragEnter={(e) => e.preventDefault()}
+						className={`flex-1 flex flex-col items-center justify-center border-2 border-dashed rounded-2xl cursor-pointer p-6 transition-all ${
+							isDraggingOver ? "scale-[0.99]" : "hover:opacity-80"
+						}`}
 						style={{
 							backgroundColor: "var(--bg-surface-sub)",
-							borderColor: "var(--border-light)",
+							borderColor: isDraggingOver
+								? "var(--accent)"
+								: "var(--border-light)",
 						}}
 					>
 						<div
-							className="p-3.5 rounded-2xl mb-3 shadow-inner text-blue-400"
-							style={{ backgroundColor: "var(--bg-surface)" }}
+							className="p-3.5 rounded-2xl mb-3 shadow-inner"
+							style={{
+								backgroundColor: "var(--bg-surface)",
+								color: "var(--accent)",
+							}}
 						>
 							<UploadCloud className="h-7 w-7" />
 						</div>
@@ -255,38 +276,43 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 							className="text-xs font-semibold"
 							style={{ color: "var(--text-app)" }}
 						>
-							Перетащите изображения сюда
+							{t.dropzoneTitle}
 						</span>
 						<span
 							className="text-[11px] mt-1"
 							style={{ color: "var(--text-dim)" }}
 						>
-							или нажмите для выбора файлов (до 10 шт.)
+							{t.dropzoneSub}
 						</span>
 					</div>
 				) : (
 					<div
 						className="flex-1 flex flex-col border rounded-2xl p-3.5 overflow-hidden"
 						style={{
-							backgroundColor: "var(--bg-surface)",
-							borderColor: "var(--border-app)",
+							backgroundColor: "var(--bg-surface-sub)",
+							borderColor: "var(--border-light)",
 						}}
 					>
 						<div
 							className="flex items-center justify-between pb-2 mb-2 border-b text-xs"
-							style={{ borderColor: "var(--border-app)" }}
+							style={{ borderColor: "var(--border-light)" }}
 						>
 							<div className="flex items-center gap-2">
 								<span
 									className="font-semibold"
 									style={{ color: "var(--text-app)" }}
 								>
-									Прикрепленные файлы
+									{t.attachedFiles}
 								</span>
 								<span
-									className={`text-[11px] font-mono px-2 py-0.5 rounded-md ${attachedFiles.length >= 10 ? "bg-amber-500/20 text-amber-300" : "opacity-70"}`}
+									className="text-[11px] font-mono px-2 py-0.5 rounded-md border"
+									style={{
+										backgroundColor: "var(--bg-surface)",
+										borderColor: "var(--border-light)",
+										color: "var(--text-app)",
+									}}
 								>
-									{attachedFiles.length} / 10 медиа
+									{attachedFiles.length} / 10 {t.mediaLimit}
 								</span>
 							</div>
 
@@ -294,21 +320,28 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 								{!editingPostId && attachedFiles.length > 1 && (
 									<button
 										onClick={onOpenBatchModal}
-										className="flex items-center gap-1 text-[11px] text-amber-400 hover:text-amber-300 font-semibold px-2 py-1 rounded-lg bg-amber-500/10 border border-amber-500/20"
-										title="Разбить эти файлы на несколько постов"
+										className="flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-lg border hover:opacity-80 transition-opacity"
+										style={{
+											backgroundColor:
+												"var(--bg-surface)",
+											borderColor: "var(--border-light)",
+											color: "var(--text-app)",
+										}}
+										title={t.batchGen}
 									>
 										<Layers3 className="h-3.5 w-3.5" />
-										<span>Пакетная генерация</span>
+										<span>{t.batchGen}</span>
 									</button>
 								)}
 
 								<button
 									onClick={onSelectFiles}
 									disabled={attachedFiles.length >= 10}
-									className="flex items-center gap-1 text-[11px] text-blue-400 hover:text-blue-300 font-medium disabled:opacity-40"
+									className="flex items-center gap-1 text-[11px] font-medium disabled:opacity-40 hover:opacity-80 transition-opacity"
+									style={{ color: "var(--accent)" }}
 								>
 									<ImagePlus className="h-3.5 w-3.5" />
-									<span>Добавить еще</span>
+									<span>{t.addMore}</span>
 								</button>
 							</div>
 						</div>
@@ -318,11 +351,10 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 						>
 							{attachedFiles.map((file, idx) => (
 								<div
-									key={idx}
+									key={`${file.path}_${idx}`}
 									className="group relative h-28 rounded-xl border overflow-hidden shadow-md flex items-center justify-center transition-all"
 									style={{
-										backgroundColor:
-											"var(--bg-surface-sub)",
+										backgroundColor: "var(--bg-surface)",
 										borderColor: "var(--border-light)",
 									}}
 								>
@@ -344,7 +376,12 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 											}
 											className="flex flex-col items-center p-2 text-center cursor-pointer"
 										>
-											<FileText className="h-7 w-7 text-blue-400 mb-1" />
+											<FileText
+												className="h-7 w-7 mb-1"
+												style={{
+													color: "var(--accent)",
+												}}
+											/>
 											<span
 												className="text-[10px] truncate max-w-[90px]"
 												style={{
@@ -368,12 +405,12 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 												onMoveFile(idx, idx - 1);
 											}}
 											className="p-1 rounded hover:bg-white/20 text-white disabled:opacity-20 transition-colors"
-											title="Сдвинуть влево"
+											title="Move left"
 										>
 											<ArrowLeft className="h-3 w-3" />
 										</button>
 										<span className="text-[9px] font-mono text-white/70">
-											позиция
+											{t.position}
 										</span>
 										<button
 											disabled={
@@ -384,7 +421,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 												onMoveFile(idx, idx + 1);
 											}}
 											className="p-1 rounded hover:bg-white/20 text-white disabled:opacity-20 transition-colors"
-											title="Сдвинуть вправо"
+											title="Move right"
 										>
 											<ArrowRight className="h-3 w-3" />
 										</button>
@@ -396,7 +433,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 											onRemoveFile(idx);
 										}}
 										className="absolute top-1.5 right-1.5 p-1 rounded-full bg-black/70 hover:bg-rose-600 text-white shadow-lg backdrop-blur-sm transition-colors z-10"
-										title="Удалить"
+										title="Delete"
 									>
 										<X className="h-3 w-3" />
 									</button>
@@ -407,11 +444,12 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 				)}
 			</div>
 
+			{/* Настройки публикации */}
 			<div
 				className="mt-3 rounded-2xl border overflow-hidden select-none"
 				style={{
-					backgroundColor: "var(--bg-surface)",
-					borderColor: "var(--border-app)",
+					backgroundColor: "var(--bg-surface-sub)",
+					borderColor: "var(--border-light)",
 				}}
 			>
 				<button
@@ -419,7 +457,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 					className="w-full flex items-center justify-between p-3 text-xs font-semibold hover:opacity-80 transition-opacity"
 					style={{ color: "var(--text-app)" }}
 				>
-					<span>Настройки публикации</span>
+					<span>{t.pubSettings}</span>
 					{isSettingsOpen ? (
 						<ChevronUp className="h-4 w-4" />
 					) : (
@@ -430,7 +468,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 				{isSettingsOpen && (
 					<div
 						className="p-3 pt-0 space-y-3.5 border-t"
-						style={{ borderColor: "var(--border-app)" }}
+						style={{ borderColor: "var(--border-light)" }}
 					>
 						<div className="flex items-center justify-between pt-2">
 							<div className="flex flex-col">
@@ -438,150 +476,139 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 									className="text-xs font-medium"
 									style={{ color: "var(--text-app)" }}
 								>
-									Стиль отображения медиа
+									{t.mediaStyle}
 								</span>
 								<span
 									className="text-[11px]"
 									style={{ color: "var(--text-dim)" }}
 								>
-									Формат отображения в ленте ВК
+									{t.mediaStyleSub}
 								</span>
 							</div>
 							<div
 								className="flex items-center border rounded-lg p-0.5"
 								style={{
-									backgroundColor: "var(--bg-surface-sub)",
+									backgroundColor: "var(--bg-surface)",
 									borderColor: "var(--border-light)",
 								}}
 							>
 								<button
 									onClick={() => onSetViewMode("grid")}
-									className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition-colors ${
-										attachmentsViewMode === "grid"
-											? "bg-blue-600 text-white shadow-sm font-semibold"
-											: "opacity-70 hover:opacity-100"
-									}`}
+									className="flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold transition-all"
+									style={{
+										backgroundColor:
+											attachmentsViewMode === "grid"
+												? "var(--btn-primary-bg)"
+												: "transparent",
+										color:
+											attachmentsViewMode === "grid"
+												? "var(--btn-primary-text)"
+												: "var(--text-muted)",
+									}}
 								>
 									<LayoutGrid className="h-3.5 w-3.5" />
-									<span>Сетка</span>
+									<span>{t.grid}</span>
 								</button>
 								<button
 									onClick={() => onSetViewMode("carousel")}
-									className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium transition-colors ${
-										attachmentsViewMode === "carousel"
-											? "bg-blue-600 text-white shadow-sm font-semibold"
-											: "opacity-70 hover:opacity-100"
-									}`}
+									className="flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold transition-all"
+									style={{
+										backgroundColor:
+											attachmentsViewMode === "carousel"
+												? "var(--btn-primary-bg)"
+												: "transparent",
+										color:
+											attachmentsViewMode === "carousel"
+												? "var(--btn-primary-text)"
+												: "var(--text-muted)",
+									}}
 								>
 									<SlidersHorizontal className="h-3.5 w-3.5" />
-									<span>Карусель</span>
+									<span>{t.carousel}</span>
 								</button>
 							</div>
 						</div>
 
-						<div className="flex items-center justify-between">
-							<span
-								className="text-xs font-medium"
-								style={{ color: "var(--text-app)" }}
+						{[
+							{
+								label: t.comments,
+								sub: "",
+								val: commentsOnPost,
+								toggle: onToggleComments,
+							},
+							{
+								label: t.notifications,
+								sub: t.notificationsSub,
+								val: notifyFollowers,
+								toggle: onToggleNotify,
+							},
+							{
+								label: t.authorSign,
+								sub: t.authorSignSub,
+								val: authorsName,
+								toggle: onToggleAuthor,
+							},
+							{
+								label: t.adsMark,
+								sub: t.adsMarkSub,
+								val: adFromCreator,
+								toggle: onToggleAd,
+							},
+						].map((item, idx) => (
+							<div
+								key={idx}
+								className="flex items-start justify-between"
 							>
-								Комментарии к записи
-							</span>
-							<label className="relative inline-flex items-center cursor-pointer">
-								<input
-									type="checkbox"
-									checked={commentsOnPost}
-									onChange={(e) =>
-										onToggleComments(e.target.checked)
-									}
-									className="sr-only peer"
-								/>
-								<div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-500 border border-slate-700"></div>
-							</label>
-						</div>
-
-						<div className="flex items-start justify-between">
-							<div className="flex flex-col pr-4">
-								<span
-									className="text-xs font-medium"
-									style={{ color: "var(--text-app)" }}
-								>
-									Уведомление для подписчиков
-								</span>
-								<span
-									className="text-[11px]"
-									style={{ color: "var(--text-dim)" }}
-								>
-									Колокольчик подписчикам
-								</span>
+								<div className="flex flex-col pr-4">
+									<span
+										className="text-xs font-medium"
+										style={{ color: "var(--text-app)" }}
+									>
+										{item.label}
+									</span>
+									{item.sub && (
+										<span
+											className="text-[11px]"
+											style={{ color: "var(--text-dim)" }}
+										>
+											{item.sub}
+										</span>
+									)}
+								</div>
+								<label className="relative inline-flex items-center cursor-pointer mt-0.5">
+									<input
+										type="checkbox"
+										checked={item.val}
+										onChange={(e) =>
+											item.toggle(e.target.checked)
+										}
+										className="sr-only peer"
+									/>
+									<div
+										className="w-9 h-5 rounded-full border transition-all relative flex items-center px-0.5"
+										style={{
+											backgroundColor: item.val
+												? "var(--btn-primary-bg)"
+												: "var(--bg-surface)",
+											borderColor: "var(--border-light)",
+										}}
+									>
+										<div
+											className={`h-3.5 w-3.5 rounded-full transition-transform ${
+												item.val
+													? "translate-x-4 shadow-sm"
+													: ""
+											}`}
+											style={{
+												backgroundColor: item.val
+													? "var(--btn-primary-text)"
+													: "var(--text-dim)",
+											}}
+										/>
+									</div>
+								</label>
 							</div>
-							<label className="relative inline-flex items-center cursor-pointer mt-0.5">
-								<input
-									type="checkbox"
-									checked={notifyFollowers}
-									onChange={(e) =>
-										onToggleNotify(e.target.checked)
-									}
-									className="sr-only peer"
-								/>
-								<div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-500 border border-slate-700"></div>
-							</label>
-						</div>
-
-						<div className="flex items-start justify-between">
-							<div className="flex flex-col pr-4">
-								<span
-									className="text-xs font-medium"
-									style={{ color: "var(--text-app)" }}
-								>
-									Подпись автора
-								</span>
-								<span
-									className="text-[11px]"
-									style={{ color: "var(--text-dim)" }}
-								>
-									«Автор: Имя Фамилия»
-								</span>
-							</div>
-							<label className="relative inline-flex items-center cursor-pointer mt-0.5">
-								<input
-									type="checkbox"
-									checked={authorsName}
-									onChange={(e) =>
-										onToggleAuthor(e.target.checked)
-									}
-									className="sr-only peer"
-								/>
-								<div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-500 border border-slate-700"></div>
-							</label>
-						</div>
-
-						<div className="flex items-start justify-between">
-							<div className="flex flex-col pr-4">
-								<span
-									className="text-xs font-medium"
-									style={{ color: "var(--text-app)" }}
-								>
-									Метка «Реклама от автора»
-								</span>
-								<span
-									className="text-[11px]"
-									style={{ color: "var(--text-dim)" }}
-								>
-									Нельзя изменить после публикации
-								</span>
-							</div>
-							<label className="relative inline-flex items-center cursor-pointer mt-0.5">
-								<input
-									type="checkbox"
-									checked={adFromCreator}
-									onChange={(e) =>
-										onToggleAd(e.target.checked)
-									}
-									className="sr-only peer"
-								/>
-								<div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-500 border border-slate-700"></div>
-							</label>
-						</div>
+						))}
 					</div>
 				)}
 			</div>
@@ -591,18 +618,21 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 					className="mt-3 p-3.5 rounded-2xl border flex flex-col gap-3 text-xs select-none relative"
 					ref={calendarRef}
 					style={{
-						backgroundColor: "var(--bg-surface)",
-						borderColor: "var(--border-app)",
+						backgroundColor: "var(--bg-surface-sub)",
+						borderColor: "var(--border-light)",
 					}}
 				>
 					<div className="flex items-center justify-between">
 						<div className="flex items-center gap-2">
-							<Calendar className="h-4 w-4 text-blue-400" />
+							<Calendar
+								className="h-4 w-4"
+								style={{ color: "var(--accent)" }}
+							/>
 							<span
 								className="font-medium"
 								style={{ color: "var(--text-app)" }}
 							>
-								Задать время слота вручную
+								{t.manualTimeToggle}
 							</span>
 						</div>
 						<label className="relative inline-flex items-center cursor-pointer">
@@ -614,31 +644,55 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 								}
 								className="sr-only peer"
 							/>
-							<div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-500 border border-slate-700"></div>
+							<div
+								className="w-9 h-5 rounded-full border transition-all relative flex items-center px-0.5"
+								style={{
+									backgroundColor: isManualTime
+										? "var(--btn-primary-bg)"
+										: "var(--bg-surface)",
+									borderColor: "var(--border-light)",
+								}}
+							>
+								<div
+									className={`h-3.5 w-3.5 rounded-full transition-transform ${
+										isManualTime
+											? "translate-x-4 shadow-sm"
+											: ""
+									}`}
+									style={{
+										backgroundColor: isManualTime
+											? "var(--btn-primary-text)"
+											: "var(--text-dim)",
+									}}
+								/>
+							</div>
 						</label>
 					</div>
 
 					{isManualTime && (
 						<div
 							className="pt-2.5 border-t flex items-center justify-between gap-3"
-							style={{ borderColor: "var(--border-app)" }}
+							style={{ borderColor: "var(--border-light)" }}
 						>
 							<span
 								className="text-[11px]"
 								style={{ color: "var(--text-dim)" }}
 							>
-								Время публикации:
+								{t.pubTime}
 							</span>
 							<button
 								onClick={onToggleCalendar}
 								className="flex items-center gap-2 border rounded-xl px-3 py-1.5 text-xs font-mono focus:outline-none transition-colors"
 								style={{
-									backgroundColor: "var(--bg-surface-sub)",
+									backgroundColor: "var(--bg-surface)",
 									borderColor: "var(--border-light)",
 									color: "var(--text-app)",
 								}}
 							>
-								<Clock className="h-3.5 w-3.5 text-blue-400" />
+								<Clock
+									className="h-3.5 w-3.5"
+									style={{ color: "var(--accent)" }}
+								/>
 								<span>{getCustomDisplayString()}</span>
 							</button>
 						</div>
@@ -668,7 +722,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 												subMonths(viewMonth, 1),
 											)
 										}
-										className="p-1 rounded-lg hover:opacity-80"
+										className="p-1 rounded-lg border hover:opacity-80"
 									>
 										<CL className="h-4 w-4" />
 									</button>
@@ -678,7 +732,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 												addMonths(viewMonth, 1),
 											)
 										}
-										className="p-1 rounded-lg hover:opacity-80"
+										className="p-1 rounded-lg border hover:opacity-80"
 									>
 										<CR className="h-4 w-4" />
 									</button>
@@ -694,8 +748,8 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 								<span>Ср</span>
 								<span>Чт</span>
 								<span>Пт</span>
-								<span className="text-amber-500/80">Сб</span>
-								<span className="text-amber-500/80">Вс</span>
+								<span className="opacity-70">Сб</span>
+								<span className="opacity-70">Вс</span>
 							</div>
 
 							<div className="grid grid-cols-7 gap-1 text-center text-xs">
@@ -714,11 +768,19 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 											}
 											className={`h-7 w-7 mx-auto rounded-lg flex items-center justify-center font-mono text-[11px] transition-colors ${
 												isSelected
-													? "bg-blue-600 text-white font-semibold shadow-md"
+													? "shadow-md font-bold"
 													: isCurrentMonth
 														? "hover:opacity-80"
 														: "opacity-30"
 											}`}
+											style={{
+												backgroundColor: isSelected
+													? "var(--btn-primary-bg)"
+													: "transparent",
+												color: isSelected
+													? "var(--btn-primary-text)"
+													: "var(--text-app)",
+											}}
 										>
 											{format(day, "d")}
 										</button>
@@ -728,13 +790,15 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 
 							<div
 								className="mt-3 pt-3 border-t flex items-center justify-between text-xs"
-								style={{ borderColor: "var(--border-app)" }}
+								style={{ borderColor: "var(--border-light)" }}
 							>
 								<span
 									className="text-[11px]"
 									style={{ color: "var(--text-dim)" }}
 								>
-									Время (24h):
+									{lang === "ru"
+										? "Время (24h):"
+										: "Time (24h):"}
 								</span>
 								<div className="flex items-center gap-1 font-mono">
 									<select
@@ -754,11 +818,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 									>
 										{Array.from({ length: 24 }).map(
 											(_, i) => (
-												<option
-													key={i}
-													value={i}
-													className="bg-slate-900 text-slate-100"
-												>
+												<option key={i} value={i}>
 													{i
 														.toString()
 														.padStart(2, "0")}
@@ -786,11 +846,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 											(_, i) => {
 												const m = i * 5;
 												return (
-													<option
-														key={m}
-														value={m}
-														className="bg-slate-900 text-slate-100"
-													>
+													<option key={m} value={m}>
 														{m
 															.toString()
 															.padStart(2, "0")}
@@ -805,9 +861,14 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 							<div className="mt-3 flex justify-end">
 								<button
 									onClick={onToggleCalendar}
-									className="w-full py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold shadow-md"
+									className="w-full py-1.5 rounded-xl text-xs font-semibold shadow-md transition-all active:scale-95"
+									style={{
+										backgroundColor:
+											"var(--btn-primary-bg)",
+										color: "var(--btn-primary-text)",
+									}}
 								>
-									Применить
+									{t.apply}
 								</button>
 							</div>
 						</div>
@@ -815,6 +876,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 				</div>
 			)}
 
+			{/* Кнопка добавления / сохранения */}
 			<div
 				className="mt-4 pt-3 border-t flex items-center gap-3"
 				style={{ borderColor: "var(--border-app)" }}
@@ -829,24 +891,24 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 							color: "var(--text-app)",
 						}}
 					>
-						Отмена
+						{t.cancel}
 					</button>
 				)}
 
 				<button
 					onClick={onSavePost}
 					disabled={!selectedTargetId}
-					className={`flex-1 flex items-center justify-center gap-2.5 rounded-xl py-3.5 text-sm font-semibold text-white shadow-lg transition-all active:scale-[0.99] disabled:opacity-50 disabled:pointer-events-none ${
-						editingPostId
-							? "bg-emerald-600 hover:bg-emerald-500"
-							: "bg-blue-600 hover:bg-blue-500"
-					}`}
+					className="flex-1 flex items-center justify-center gap-2.5 rounded-xl py-3.5 text-sm font-bold shadow-lg transition-all active:scale-[0.99] disabled:opacity-50 disabled:pointer-events-none"
+					style={{
+						backgroundColor: "var(--btn-primary-bg)",
+						color: "var(--btn-primary-text)",
+					}}
 				>
 					{editingPostId ? (
 						<>
 							<Save className="h-4 w-4" />
 							<span>
-								Сохранить изменения в посте #{editingPostId}
+								{t.saveChanges} #{editingPostId}
 							</span>
 						</>
 					) : (
@@ -854,8 +916,8 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 							<Plus className="h-4 w-4" />
 							<span>
 								{isManualTime
-									? `Добавить на выбранное время — ${getCustomDisplayString()}`
-									: `Добавить в очередь — ${nextSlotDisplay}`}
+									? `${t.addToQueue} — ${getCustomDisplayString()}`
+									: `${t.addToQueue} — ${nextSlotDisplay}`}
 							</span>
 						</>
 					)}

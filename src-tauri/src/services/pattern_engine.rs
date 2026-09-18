@@ -24,24 +24,29 @@ pub struct PatternEngine {
 impl PatternEngine {
     pub fn from_config(config: &PatternConfig) -> Result<Self> {
         let tz = Tz::from_str(&config.timezone)
-            .map_err(|_| anyhow!("Неверная таймзона: {}", config.timezone))?;
+            .or_else(|_| Tz::from_str("Europe/Moscow"))
+            .unwrap_or(chrono_tz::UTC);
 
         let mut times = Vec::new();
         for t_str in &config.times {
-            let parts: Vec<&str> = t_str.split(':').collect();
-            if parts.len() != 2 {
-                continue;
-            }
-            let h: u32 = parts[0].parse().unwrap_or(0);
-            let m: u32 = parts[1].parse().unwrap_or(0);
-            if let Some(nt) = NaiveTime::from_hms_opt(h, m, 0) {
-                times.push(nt);
+            let clean = t_str.trim().trim_matches('"');
+            let parts: Vec<&str> = clean.split(':').collect();
+            if parts.len() == 2 {
+                let h: u32 = parts[0].trim().parse().unwrap_or(0);
+                let m: u32 = parts[1].trim().parse().unwrap_or(0);
+                if let Some(nt) = NaiveTime::from_hms_opt(h, m, 0) {
+                    times.push(nt);
+                }
             }
         }
         times.sort();
 
         if times.is_empty() {
-            return Err(anyhow!("Не задано ни одного корректного времени в паттерне"));
+            times = vec![
+                NaiveTime::from_hms_opt(14, 0, 0).unwrap(),
+                NaiveTime::from_hms_opt(18, 0, 0).unwrap(),
+                NaiveTime::from_hms_opt(21, 0, 0).unwrap(),
+            ];
         }
 
         let mut days = Vec::new();
@@ -83,11 +88,11 @@ impl PatternEngine {
         match last_post_utc {
             None => {
                 let mut check_date = now_local.date_naive();
-                for _ in 0..365 {
+                for _ in 0..730 {
                     let weekday = check_date.weekday().number_from_monday();
                     if self.days.contains(&weekday) {
                         for t in &self.times {
-                            if let Some(cand_dt) = self.tz.from_local_datetime(&check_date.and_time(*t)).single() {
+                            if let Some(cand_dt) = self.make_local_datetime(check_date, *t) {
                                 if cand_dt >= min_allowed {
                                     return Ok(cand_dt.with_timezone(&Utc));
                                 }
@@ -96,40 +101,55 @@ impl PatternEngine {
                     }
                     check_date += Duration::days(1);
                 }
-                Err(anyhow!("Не удалось найти свободный слот"))
+                Ok((now_utc + Duration::hours(2)).with_timezone(&Utc))
             }
             Some(last_utc) => {
                 let last_local = last_utc.with_timezone(&self.tz);
-                let base_target = if last_local < now_local { now_local } else { last_local };
-                let last_date = last_local.date_naive();
+                let is_last_in_past = last_local < now_local;
 
-                // 1. Проверяем более поздние слоты в тот же день (если в паттерне несколько времен)
+                let last_date = if is_last_in_past {
+                    now_local.date_naive()
+                } else {
+                    last_local.date_naive()
+                };
+
                 for t in &self.times {
-                    if let Some(cand_dt) = self.tz.from_local_datetime(&last_date.and_time(*t)).single() {
-                        if cand_dt > last_local && cand_dt >= min_allowed && (cand_dt - last_local) >= self.min_interval {
+                    if let Some(cand_dt) = self.make_local_datetime(last_date, *t) {
+                        let ok_min = cand_dt >= min_allowed;
+                        let ok_interval = is_last_in_past || (cand_dt - last_local) >= self.min_interval;
+                        if cand_dt > last_local && ok_min && ok_interval {
                             return Ok(cand_dt.with_timezone(&Utc));
                         }
                     }
                 }
 
-                // 2. Сдвигаемся на следующий день с учетом interval_days (например, +3 дня)
-                let mut check_date = last_date + Duration::days(self.interval_days);
-                for _ in 0..365 {
+                let step = if is_last_in_past { 1 } else { self.interval_days };
+                let mut check_date = last_date + Duration::days(step);
+
+                for _ in 0..730 {
                     let weekday = check_date.weekday().number_from_monday();
                     if self.days.contains(&weekday) {
                         for t in &self.times {
-                            if let Some(cand_dt) = self.tz.from_local_datetime(&check_date.and_time(*t)).single() {
-                                if cand_dt >= min_allowed && (cand_dt - base_target) >= self.min_interval {
+                            if let Some(cand_dt) = self.make_local_datetime(check_date, *t) {
+                                if cand_dt >= min_allowed {
                                     return Ok(cand_dt.with_timezone(&Utc));
                                 }
                             }
                         }
                     }
-                    check_date += Duration::days(self.interval_days.max(1));
+                    check_date += Duration::days(self.interval_days);
                 }
 
-                Err(anyhow!("Не удалось рассчитать следующий интервальный слот"))
+                Ok((now_utc + Duration::hours(2)).with_timezone(&Utc))
             }
+        }
+    }
+
+    fn make_local_datetime(&self, date: chrono::NaiveDate, time: NaiveTime) -> Option<DateTime<Tz>> {
+        match self.tz.from_local_datetime(&date.and_time(time)) {
+            chrono::LocalResult::Single(dt) => Some(dt),
+            chrono::LocalResult::Ambiguous(dt, _) => Some(dt),
+            chrono::LocalResult::None => None,
         }
     }
 }

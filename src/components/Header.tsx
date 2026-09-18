@@ -5,22 +5,23 @@ import {
 	Trash2,
 	PanelRightClose,
 	PanelRightOpen,
-	Palette,
+	Settings,
 } from "lucide-react";
-import { Account, Target, Theme } from "../types";
+import { Account, Target } from "../types";
+import { translations, Lang } from "../services/i18n";
 
 interface HeaderProps {
 	accounts: Account[];
 	activeAccountId: number | null;
 	targets: Target[];
 	selectedTargetId: number | null;
-	theme: Theme;
+	lang: Lang;
 	isRightPanelOpen: boolean;
 	onSwitchAccount: (id: number) => void;
 	onDeleteAccount: () => void;
 	onOpenTokenModal: () => void;
 	onSelectTarget: (id: number) => void;
-	onSetTheme: (theme: Theme) => void;
+	onOpenSettings: () => void;
 	onToggleRightPanel: () => void;
 }
 
@@ -29,15 +30,17 @@ export const Header: React.FC<HeaderProps> = ({
 	activeAccountId,
 	targets,
 	selectedTargetId,
-	theme,
+	lang,
 	isRightPanelOpen,
 	onSwitchAccount,
 	onDeleteAccount,
 	onOpenTokenModal,
 	onSelectTarget,
-	onSetTheme,
+	onOpenSettings,
 	onToggleRightPanel,
 }) => {
+	const t = translations[lang];
+
 	return (
 		<header
 			className="flex items-center justify-between px-6 py-3 border-b select-none transition-colors"
@@ -49,8 +52,11 @@ export const Header: React.FC<HeaderProps> = ({
 			<div className="flex items-center gap-6">
 				<div className="flex items-center gap-2.5">
 					<div
-						className="p-1.5 rounded-lg text-blue-400"
-						style={{ backgroundColor: "var(--accent-glow)" }}
+						className="p-1.5 rounded-lg"
+						style={{
+							backgroundColor: "var(--accent-glow)",
+							color: "var(--accent)",
+						}}
 					>
 						<Layers className="h-5 w-5" />
 					</div>
@@ -58,7 +64,7 @@ export const Header: React.FC<HeaderProps> = ({
 						className="font-bold tracking-tight text-base"
 						style={{ color: "var(--text-app)" }}
 					>
-						VK Post Studio
+						{t.appTitle}
 					</span>
 				</div>
 
@@ -67,7 +73,7 @@ export const Header: React.FC<HeaderProps> = ({
 						className="text-xs font-medium"
 						style={{ color: "var(--text-dim)" }}
 					>
-						Токен:
+						{t.token}
 					</span>
 					{accounts.length > 0 ? (
 						<div className="flex items-center gap-1.5">
@@ -84,11 +90,7 @@ export const Header: React.FC<HeaderProps> = ({
 								}
 							>
 								{accounts.map((acc) => (
-									<option
-										key={acc.id}
-										value={acc.id}
-										className="bg-slate-900 text-slate-100"
-									>
+									<option key={acc.id} value={acc.id}>
 										{acc.name}
 									</option>
 								))}
@@ -98,14 +100,18 @@ export const Header: React.FC<HeaderProps> = ({
 								onClick={onDeleteAccount}
 								className="p-1.5 rounded-lg hover:text-rose-400 transition-colors"
 								style={{ color: "var(--text-muted)" }}
-								title="Удалить этот токен"
+								title={
+									lang === "ru"
+										? "Удалить этот токен"
+										: "Delete this token"
+								}
 							>
 								<Trash2 className="h-3.5 w-3.5" />
 							</button>
 						</div>
 					) : (
 						<span className="text-xs font-medium text-amber-400">
-							Нет токенов
+							{t.noTokens}
 						</span>
 					)}
 
@@ -119,7 +125,7 @@ export const Header: React.FC<HeaderProps> = ({
 						}}
 					>
 						<Plus className="h-3.5 w-3.5" />
-						<span>Добавить токен</span>
+						<span>{t.addToken}</span>
 					</button>
 				</div>
 			</div>
@@ -137,7 +143,7 @@ export const Header: React.FC<HeaderProps> = ({
 							className="text-xs"
 							style={{ color: "var(--text-dim)" }}
 						>
-							Цель:
+							{t.target}
 						</span>
 						<select
 							className="bg-transparent text-xs font-medium focus:outline-none cursor-pointer max-w-[220px] truncate"
@@ -147,59 +153,28 @@ export const Header: React.FC<HeaderProps> = ({
 								onSelectTarget(Number(e.target.value))
 							}
 						>
-							{targets.map((t) => (
-								<option
-									key={t.id}
-									value={t.id}
-									className="bg-slate-900 text-slate-100"
-								>
-									{t.title}
+							{targets.map((tgt) => (
+								<option key={tgt.id} value={tgt.id}>
+									{tgt.title}
 								</option>
 							))}
 						</select>
 					</div>
 				)}
 
-				{/* Переключатель тем оформления */}
-				<div
-					className="flex items-center gap-1.5 border rounded-lg px-2 py-1"
+				<button
+					onClick={onOpenSettings}
+					className="p-1.5 rounded-lg border transition-colors hover:opacity-80"
 					style={{
 						backgroundColor: "var(--bg-surface-sub)",
 						borderColor: "var(--border-light)",
+						color: "var(--text-app)",
 					}}
+					title={t.settings}
 				>
-					<Palette
-						className="h-3.5 w-3.5"
-						style={{ color: "var(--text-dim)" }}
-					/>
-					<select
-						className="bg-transparent text-xs font-medium focus:outline-none cursor-pointer"
-						style={{ color: "var(--text-app)" }}
-						value={theme}
-						onChange={(e) => onSetTheme(e.target.value as Theme)}
-					>
-						<option
-							value="classic"
-							className="bg-slate-900 text-slate-100"
-						>
-							Классическая
-						</option>
-						<option
-							value="dark"
-							className="bg-slate-900 text-slate-100"
-						>
-							Тёмная
-						</option>
-						<option
-							value="light"
-							className="bg-white text-slate-900"
-						>
-							Светлая
-						</option>
-					</select>
-				</div>
+					<Settings className="h-4 w-4" />
+				</button>
 
-				{/* Кнопка сворачивания правой панели */}
 				<button
 					onClick={onToggleRightPanel}
 					className="p-1.5 rounded-lg border transition-colors"

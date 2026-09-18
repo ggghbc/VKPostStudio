@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Header } from "./components/Header";
 import { PostCreator } from "./components/PostCreator";
@@ -10,6 +11,7 @@ import {
 	RevertModal,
 	RescheduleModal,
 	LightboxModal,
+	SettingsModal,
 } from "./components/Modals";
 import { api } from "./services/api";
 import {
@@ -20,17 +22,32 @@ import {
 	FilePreview,
 	Theme,
 } from "./types";
+import { Lang, translations } from "./services/i18n";
 
 export default function App() {
 	const [theme, setTheme] = useState<Theme>(
 		() => (localStorage.getItem("vk_theme") as Theme) || "classic",
 	);
+	const [lang, setLang] = useState<Lang>(
+		() => (localStorage.getItem("vk_lang") as Lang) || "ru",
+	);
+
 	const [accounts, setAccounts] = useState<Account[]>([]);
-	const [activeAccountId, setActiveAccountId] = useState<number | null>(null);
+	const [activeAccountId, setActiveAccountId] = useState<number | null>(
+		() => {
+			const saved = localStorage.getItem("vk_active_acc");
+			return saved ? Number(saved) : null;
+		},
+	);
+
 	const [targets, setTargets] = useState<Target[]>([]);
 	const [selectedTargetId, setSelectedTargetId] = useState<number | null>(
-		null,
+		() => {
+			const saved = localStorage.getItem("vk_selected_target");
+			return saved ? Number(saved) : null;
+		},
 	);
+
 	const [patterns, setPatterns] = useState<Pattern[]>([]);
 	const [selectedPatternId, setSelectedPatternId] = useState<number | null>(
 		null,
@@ -45,13 +62,17 @@ export default function App() {
 		"list",
 	);
 	const [expandedPostIds, setExpandedPostIds] = useState<number[]>([]);
-	const [nextSlotDisplay, setNextSlotDisplay] = useState<string>("Расчет...");
+	const [nextSlotDisplay, setNextSlotDisplay] = useState<string>("14:00");
 	const [isSyncingVk, setIsSyncingVk] = useState(false);
 	const [isRightPanelOpen, setIsRightPanelOpen] = useState(true);
 
 	const [editingPostId, setEditingPostId] = useState<number | null>(null);
 	const [postText, setPostText] = useState("");
 	const [attachedFiles, setAttachedFiles] = useState<FilePreview[]>([]);
+	const attachedFilesRef = useRef<FilePreview[]>([]);
+	attachedFilesRef.current = attachedFiles;
+
+	const [isDraggingOver, setIsDraggingOver] = useState(false);
 	const [attachmentsViewMode, setAttachmentsViewMode] = useState<
 		"grid" | "carousel"
 	>("grid");
@@ -97,6 +118,7 @@ export default function App() {
 	);
 
 	const [showTokenModal, setShowTokenModal] = useState(false);
+	const [showSettingsModal, setShowSettingsModal] = useState(false);
 	const [newTokenInput, setNewTokenInput] = useState("");
 	const [isAddingToken, setIsAddingToken] = useState(false);
 
@@ -108,11 +130,111 @@ export default function App() {
 	const [newPatternIntervalDays, setNewPatternIntervalDays] =
 		useState<number>(1);
 
-	// Смена темы
+	const processingDropRef = useRef<Set<string>>(new Set());
+	const lastDropTimeRef = useRef<number>(0);
+
 	const handleSetTheme = (newTheme: Theme) => {
 		setTheme(newTheme);
 		localStorage.setItem("vk_theme", newTheme);
 		document.documentElement.setAttribute("data-theme", newTheme);
+	};
+
+	const handleSetLang = (newLang: Lang) => {
+		setLang(newLang);
+		localStorage.setItem("vk_lang", newLang);
+	};
+
+	// Перетаскивание файлов: защита от дублей событий WebView2
+	useEffect(() => {
+		let isCancelled = false;
+		let unDrop: (() => void) | undefined;
+		let unEnter: (() => void) | undefined;
+		let unLeave: (() => void) | undefined;
+
+		const setupListeners = async () => {
+			const d = await listen<any>("tauri://drag-drop", async (event) => {
+				if (isCancelled) return;
+				setIsDraggingOver(false);
+
+				const now = Date.now();
+				if (now - lastDropTimeRef.current < 250) {
+					return;
+				}
+				lastDropTimeRef.current = now;
+
+				const rawPaths: string[] = event.payload?.paths || [];
+				if (rawPaths.length > 0) {
+					await appendFiles(rawPaths);
+				}
+			});
+			if (isCancelled) d();
+			else unDrop = d;
+
+			const e = await listen("tauri://drag-enter", () => {
+				if (!isCancelled) setIsDraggingOver(true);
+			});
+			if (isCancelled) e();
+			else unEnter = e;
+
+			const l = await listen("tauri://drag-leave", () => {
+				if (!isCancelled) setIsDraggingOver(false);
+			});
+			if (isCancelled) l();
+			else unLeave = l;
+		};
+
+		setupListeners();
+
+		return () => {
+			isCancelled = true;
+			unDrop?.();
+			unEnter?.();
+			unLeave?.();
+		};
+	}, []);
+
+	// Добавление файлов с дедупликацией по пути
+	const appendFiles = async (rawPaths: string[]) => {
+		const existing = new Set(attachedFilesRef.current.map((f) => f.path));
+		const uniqueToProcess: string[] = [];
+
+		for (const p of rawPaths) {
+			if (
+				!existing.has(p) &&
+				!processingDropRef.current.has(p) &&
+				!uniqueToProcess.includes(p)
+			) {
+				uniqueToProcess.push(p);
+				processingDropRef.current.add(p);
+			}
+		}
+
+		if (uniqueToProcess.length === 0) return;
+
+		try {
+			const items = await Promise.all(
+				uniqueToProcess.map(async (path) => ({
+					path,
+					name: path.split(/[\\/]/).pop() || "файл",
+					isImage: true,
+					previewUrl: await api
+						.getFilePreview(path)
+						.catch(() => undefined),
+				})),
+			);
+
+			setAttachedFiles((prev) => {
+				const currentPaths = new Set(prev.map((f) => f.path));
+				const finalItems = items.filter(
+					(it) => !currentPaths.has(it.path),
+				);
+				return [...prev, ...finalItems].slice(0, 10);
+			});
+		} finally {
+			for (const p of uniqueToProcess) {
+				processingDropRef.current.delete(p);
+			}
+		}
 	};
 
 	useEffect(() => {
@@ -129,9 +251,14 @@ export default function App() {
 		try {
 			const accs = await api.getAccounts();
 			setAccounts(accs);
-			const active = accs.find((a) => a.is_active) ?? accs[0] ?? null;
+			const active =
+				accs.find((a) => a.id === activeAccountId) ??
+				accs.find((a) => a.is_active) ??
+				accs[0] ??
+				null;
 			if (active) {
 				setActiveAccountId(active.id);
+				localStorage.setItem("vk_active_acc", active.id.toString());
 				await loadTargetsForAccount(active.id);
 			} else {
 				setActiveAccountId(null);
@@ -148,9 +275,22 @@ export default function App() {
 			const tgts = await api.getTargets(accId);
 			setTargets(tgts);
 			if (tgts.length > 0) {
-				setSelectedTargetId((prev) =>
-					prev && tgts.some((t) => t.id === prev) ? prev : tgts[0].id,
-				);
+				setSelectedTargetId((prev) => {
+					const match = prev && tgts.find((t) => t.id === prev);
+					const communityTarget = tgts.find(
+						(t) => t.target_type === "community",
+					);
+					const chosen = match
+						? match.id
+						: communityTarget
+							? communityTarget.id
+							: tgts[0].id;
+					localStorage.setItem(
+						"vk_selected_target",
+						chosen.toString(),
+					);
+					return chosen;
+				});
 			} else {
 				setSelectedTargetId(null);
 			}
@@ -198,15 +338,23 @@ export default function App() {
 	};
 
 	useEffect(() => {
-		if (selectedTargetId) syncVkQueue(selectedTargetId);
+		if (selectedTargetId) {
+			localStorage.setItem(
+				"vk_selected_target",
+				selectedTargetId.toString(),
+			);
+			syncVkQueue(selectedTargetId);
+		}
 	}, [selectedTargetId]);
 
+	// Расчет следующего времени постинга
 	useEffect(() => {
-		if (!selectedTargetId || !selectedPatternId) {
-			setNextSlotDisplay("Выберите цель");
+		if (!selectedTargetId) {
+			setNextSlotDisplay(translations[lang].selectTarget);
 			return;
 		}
-		api.getNextSlot(selectedTargetId, selectedPatternId)
+		const patId = selectedPatternId || (patterns[0]?.id ?? 1);
+		api.getNextSlot(selectedTargetId, patId)
 			.then((iso) => {
 				const d = new Date(iso);
 				setNextSlotDisplay(format(d, "dd/MM/yyyy HH:mm"));
@@ -216,8 +364,16 @@ export default function App() {
 					setPickerMinutes(d.getMinutes());
 				}
 			})
-			.catch(() => setNextSlotDisplay("Нет свободных слотов"));
-	}, [selectedTargetId, selectedPatternId, queue]);
+			.catch(() => {
+				const fallbackDate = new Date(Date.now() + 2 * 3600 * 1000);
+				setNextSlotDisplay(format(fallbackDate, "dd/MM/yyyy HH:mm"));
+				if (!isManualTime) {
+					setSelectedDate(fallbackDate);
+					setPickerHours(fallbackDate.getHours());
+					setPickerMinutes(fallbackDate.getMinutes());
+				}
+			});
+	}, [selectedTargetId, selectedPatternId, queue, patterns, lang]);
 
 	const handleAddFiles = async () => {
 		const res = await open({
@@ -231,25 +387,23 @@ export default function App() {
 		});
 		if (res) {
 			const paths = Array.isArray(res) ? res : [res];
-			const items = await Promise.all(
-				paths.map(async (path) => ({
-					path,
-					name: path.split(/[\\/]/).pop() || "файл",
-					isImage: true,
-					previewUrl: await api
-						.getFilePreview(path)
-						.catch(() => undefined),
-				})),
-			);
-			setAttachedFiles((prev) => [...prev, ...items].slice(0, 10));
+			await appendFiles(paths);
 		}
 	};
 
 	const handleSavePost = async () => {
 		if (!postText.trim() && attachedFiles.length === 0)
-			return alert("Добавьте текст или медиафайл");
-		if (!selectedTargetId || !selectedPatternId)
-			return alert("Выберите сообщество");
+			return alert(
+				lang === "ru"
+					? "Добавьте текст или медиафайл"
+					: "Add text or media",
+			);
+		if (!selectedTargetId)
+			return alert(
+				lang === "ru" ? "Выберите сообщество" : "Select target",
+			);
+
+		const patId = selectedPatternId || (patterns[0]?.id ?? 1);
 
 		if (editingPostId) {
 			await api.updatePost({
@@ -278,7 +432,7 @@ export default function App() {
 			: null;
 		await api.addPost({
 			targetId: selectedTargetId,
-			patternId: selectedPatternId,
+			patternId: patId,
 			text: postText.trim(),
 			signed: authorsName,
 			closeComments: !commentsOnPost,
@@ -298,16 +452,41 @@ export default function App() {
 	const handleCleanExpiredTokens = async () => {
 		if (
 			!confirm(
-				"Проверить все токены через VK API и удалить те, у которых истек срок действия или сменился IP?",
+				lang === "ru"
+					? "Проверить все токены и удалить просроченные?"
+					: "Check all tokens and delete expired ones?",
 			)
 		)
 			return;
 		try {
 			const deleted = await api.cleanExpiredTokens();
-			alert(`Удалено недействительных токенов: ${deleted}`);
+			alert(
+				`${lang === "ru" ? "Удалено недействительных токенов:" : "Removed invalid tokens:"} ${deleted}`,
+			);
 			loadAccounts();
 		} catch (e) {
-			alert("Ошибка: " + e);
+			alert("Error: " + e);
+		}
+	};
+
+	const handleDeletePattern = async (id: number) => {
+		if (
+			!confirm(
+				lang === "ru"
+					? "Удалить этот паттерн?"
+					: "Delete this pattern?",
+			)
+		)
+			return;
+		try {
+			await api.deletePattern(id);
+			const ptrns = await api.getPatterns();
+			setPatterns(ptrns);
+			if (selectedPatternId === id) {
+				setSelectedPatternId(ptrns[0]?.id ?? null);
+			}
+		} catch (e) {
+			alert("Error: " + e);
 		}
 	};
 
@@ -325,34 +504,51 @@ export default function App() {
 				: historyPosts;
 
 	return (
-		<div className="flex flex-col h-screen relative">
+		<div
+			className="flex flex-col h-screen relative"
+			style={{ backgroundColor: "var(--bg-app)" }}
+		>
 			<Header
 				accounts={accounts}
 				activeAccountId={activeAccountId}
 				targets={targets}
 				selectedTargetId={selectedTargetId}
-				theme={theme}
+				lang={lang}
 				isRightPanelOpen={isRightPanelOpen}
 				onSwitchAccount={async (id) => {
 					await api.switchAccount(id);
 					setActiveAccountId(id);
+					localStorage.setItem("vk_active_acc", id.toString());
 					loadTargetsForAccount(id);
 				}}
 				onDeleteAccount={async () => {
-					if (!activeAccountId || !confirm("Удалить этот токен?"))
+					if (
+						!activeAccountId ||
+						!confirm(
+							lang === "ru"
+								? "Удалить этот токен?"
+								: "Delete this token?",
+						)
+					)
 						return;
 					await api.deleteAccount(activeAccountId);
 					loadAccounts();
 				}}
 				onOpenTokenModal={() => setShowTokenModal(true)}
-				onSelectTarget={setSelectedTargetId}
-				onSetTheme={handleSetTheme}
+				onSelectTarget={(id) => {
+					setSelectedTargetId(id);
+					localStorage.setItem("vk_selected_target", id.toString());
+				}}
+				onOpenSettings={() => setShowSettingsModal(true)}
 				onToggleRightPanel={() =>
 					setIsRightPanelOpen(!isRightPanelOpen)
 				}
 			/>
 
-			<main className="flex flex-1 overflow-hidden relative">
+			<main
+				className="flex flex-1 overflow-hidden relative"
+				style={{ backgroundColor: "var(--bg-app)" }}
+			>
 				<PostCreator
 					editingPostId={editingPostId}
 					postText={postText}
@@ -374,6 +570,8 @@ export default function App() {
 					viewMonth={viewMonth}
 					nextSlotDisplay={nextSlotDisplay}
 					selectedTargetId={selectedTargetId}
+					isDraggingOver={isDraggingOver}
+					lang={lang}
 					onTextChange={setPostText}
 					onSelectPattern={setSelectedPatternId}
 					onOpenPatternModal={() => setShowPatternModal(true)}
@@ -424,6 +622,7 @@ export default function App() {
 					isSyncingVk={isSyncingVk}
 					isTransferring={isTransferring}
 					transferProgress={transferProgress}
+					lang={lang}
 					onSetTab={setActiveQueueTab}
 					onSetViewMode={setQueueViewMode}
 					onSetContentMonth={setContentCalendarMonth}
@@ -431,13 +630,17 @@ export default function App() {
 						if (
 							!selectedTargetId ||
 							!confirm(
-								"Удалить с диска оригиналы картинок, которые уже в ВК?",
+								lang === "ru"
+									? "Удалить с диска оригиналы картинок, которые уже в ВК?"
+									: "Delete uploaded image files from disk?",
 							)
 						)
 							return;
 						const count =
 							await api.cleanLocalFiles(selectedTargetId);
-						alert(`Очищено файлов: ${count}`);
+						alert(
+							`${lang === "ru" ? "Очищено файлов:" : "Files cleaned:"} ${count}`,
+						);
 						syncVkQueue(selectedTargetId);
 					}}
 					onSyncVk={() =>
@@ -446,7 +649,11 @@ export default function App() {
 					onStartTransfer={async () => {
 						if (!selectedTargetId) return;
 						setIsTransferring(true);
-						setTransferProgress("Отправка в VK...");
+						setTransferProgress(
+							lang === "ru"
+								? "Отправка в VK..."
+								: "Sending to VK...",
+						);
 						await api.startTransfer(selectedTargetId).catch((e) => {
 							alert(e);
 							setIsTransferring(false);
@@ -483,8 +690,9 @@ export default function App() {
 					}}
 					onOpenRevertModal={setRevertModalPost}
 					onRescheduleNextSlot={async (id) => {
-						if (!selectedPatternId) return;
-						await api.rescheduleNextSlot(id, selectedPatternId);
+						const patId =
+							selectedPatternId || (patterns[0]?.id ?? 1);
+						await api.rescheduleNextSlot(id, patId);
 						if (selectedTargetId) syncVkQueue(selectedTargetId);
 					}}
 					onOpenRescheduleModal={(post) => {
@@ -500,13 +708,26 @@ export default function App() {
 						if (selectedTargetId) syncVkQueue(selectedTargetId);
 					}}
 					onDeleteVkPost={async (id) => {
-						if (!confirm("Удалить отложенный пост со стены ВК?"))
+						if (
+							!confirm(
+								lang === "ru"
+									? "Удалить отложенный пост со стены ВК?"
+									: "Delete postponed post from VK wall?",
+							)
+						)
 							return;
 						await api.deleteVkPost(id);
 						if (selectedTargetId) syncVkQueue(selectedTargetId);
 					}}
 					onDeleteHistoryPost={async (id) => {
-						if (!confirm("Удалить запись из истории?")) return;
+						if (
+							!confirm(
+								lang === "ru"
+									? "Удалить запись из истории?"
+									: "Delete record from history?",
+							)
+						)
+							return;
 						await api.deleteHistoryPost(id);
 						if (selectedTargetId) loadHistory(selectedTargetId);
 					}}
@@ -514,10 +735,27 @@ export default function App() {
 				/>
 			</main>
 
+			<SettingsModal
+				show={showSettingsModal}
+				theme={theme}
+				lang={lang}
+				onClose={() => setShowSettingsModal(false)}
+				onSetTheme={handleSetTheme}
+				onSetLang={handleSetLang}
+				onBackupDb={async () => {
+					const path = await api.backupDatabase();
+					alert(
+						`${lang === "ru" ? "Бэкап сохранен:" : "Backup saved:"} ${path}`,
+					);
+				}}
+				onCleanExpiredTokens={handleCleanExpiredTokens}
+			/>
+
 			<TokenModal
 				show={showTokenModal}
 				tokenInput={newTokenInput}
 				isAdding={isAddingToken}
+				lang={lang}
 				onClose={() => setShowTokenModal(false)}
 				onInputChange={setNewTokenInput}
 				onOpenBrowser={api.openBrowserAuth}
@@ -536,9 +774,13 @@ export default function App() {
 						setShowTokenModal(false);
 						await loadAccounts();
 						setActiveAccountId(acc.id);
+						localStorage.setItem(
+							"vk_active_acc",
+							acc.id.toString(),
+						);
 						await loadTargetsForAccount(acc.id);
 					} catch (e) {
-						alert("Ошибка добавления: " + e);
+						alert("Error: " + e);
 					} finally {
 						setIsAddingToken(false);
 					}
@@ -548,22 +790,32 @@ export default function App() {
 
 			<PatternModal
 				show={showPatternModal}
+				patterns={patterns}
 				name={newPatternName}
 				times={newPatternTimes}
 				intervalDays={newPatternIntervalDays}
+				lang={lang}
 				onClose={() => setShowPatternModal(false)}
 				onNameChange={setNewPatternName}
 				onTimesChange={setNewPatternTimes}
 				onIntervalChange={setNewPatternIntervalDays}
 				onSubmit={async () => {
-					if (!newPatternName.trim()) return alert("Укажите имя");
+					if (!newPatternName.trim())
+						return alert(
+							lang === "ru" ? "Укажите имя" : "Enter name",
+						);
 					const times = newPatternTimes
 						.split(",")
 						.map((s) => s.trim())
 						.filter((s) =>
 							/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/.test(s),
 						);
-					if (times.length === 0) return alert("Укажите время ЧЧ:ММ");
+					if (times.length === 0)
+						return alert(
+							lang === "ru"
+								? "Укажите время ЧЧ:ММ"
+								: "Enter time HH:MM",
+						);
 					const created = await api.createPattern(
 						newPatternName,
 						times,
@@ -575,6 +827,7 @@ export default function App() {
 					setShowPatternModal(false);
 					setNewPatternName("");
 				}}
+				onDeletePattern={handleDeletePattern}
 			/>
 
 			<BatchModal
@@ -582,15 +835,17 @@ export default function App() {
 				totalFiles={attachedFiles.length}
 				chunkSize={batchChunkSize}
 				isCreating={isBatchCreating}
+				lang={lang}
 				onClose={() => setShowBatchModal(false)}
 				onSetChunkSize={setBatchChunkSize}
 				onSubmit={async () => {
-					if (!selectedTargetId || !selectedPatternId) return;
+					if (!selectedTargetId) return;
+					const patId = selectedPatternId || (patterns[0]?.id ?? 1);
 					setIsBatchCreating(true);
 					try {
 						const count = await api.batchCreate({
 							targetId: selectedTargetId,
-							patternId: selectedPatternId,
+							patternId: patId,
 							filePaths: attachedFiles.map((f) => f.path),
 							itemsPerPost: batchChunkSize,
 							text: postText.trim(),
@@ -604,7 +859,9 @@ export default function App() {
 						setPostText("");
 						setAttachedFiles([]);
 						syncVkQueue(selectedTargetId);
-						alert(`Создано постов: ${count}`);
+						alert(
+							`${lang === "ru" ? "Создано постов:" : "Posts created:"} ${count}`,
+						);
 					} finally {
 						setIsBatchCreating(false);
 					}
@@ -613,6 +870,7 @@ export default function App() {
 
 			<RevertModal
 				post={revertModalPost}
+				lang={lang}
 				onClose={() => setRevertModalPost(null)}
 				onRevertSameTime={async (id) => {
 					await api.revertSameTime(id);
@@ -621,8 +879,8 @@ export default function App() {
 					setActiveQueueTab("local");
 				}}
 				onRevertNextSlot={async (id) => {
-					if (!selectedPatternId) return;
-					await api.revertNextSlot(id, selectedPatternId);
+					const patId = selectedPatternId || (patterns[0]?.id ?? 1);
+					await api.revertNextSlot(id, patId);
 					setRevertModalPost(null);
 					if (selectedTargetId) syncVkQueue(selectedTargetId);
 					setActiveQueueTab("local");
@@ -634,7 +892,8 @@ export default function App() {
 				date={rescheduleDate}
 				hours={rescheduleHours}
 				minutes={rescheduleMinutes}
-				viewMonth={rescheduleViewMonth}
+				viewMonth={viewMonth}
+				lang={lang}
 				onClose={() => setRescheduleModalPost(null)}
 				onViewMonthChange={setRescheduleViewMonth}
 				onDateSelect={setRescheduleDate}

@@ -60,7 +60,7 @@ pub fn run() {
                 let _ = sqlx::query("ALTER TABLE posts ADD COLUMN attachments_view_mode TEXT NOT NULL DEFAULT 'grid'").execute(&pool).await;
                 let _ = sqlx::query("ALTER TABLE patterns ADD COLUMN interval_days INTEGER NOT NULL DEFAULT 1").execute(&pool).await;
 
-                // Автоматическое восстановление целостности целей и истории при запуске
+                // Автоматическое восстановление истории постов при запуске
                 let _ = sqlx::query(
                     "UPDATE posts
                      SET target_id = (
@@ -76,8 +76,6 @@ pub fn run() {
                          WHERE t_old.id = posts.target_id AND a.is_active = 1
                      )"
                 ).execute(&pool).await;
-
-                let _ = sqlx::query("UPDATE posts SET account_id = (SELECT id FROM accounts WHERE is_active = 1 LIMIT 1) WHERE (SELECT id FROM accounts WHERE is_active = 1 LIMIT 1) IS NOT NULL").execute(&pool).await;
 
                 sqlx::query(
                     "INSERT OR IGNORE INTO patterns (id, name, timezone, times_json, days_json, min_interval_minutes, interval_days, is_default)
@@ -113,6 +111,7 @@ pub fn run() {
             commands::account::get_targets,
             commands::pattern::get_patterns,
             commands::pattern::create_pattern,
+            commands::pattern::delete_pattern,
             commands::pattern::get_next_slot_preview,
             commands::pattern::reschedule_post_next_slot,
             commands::pattern::reschedule_post_custom,
