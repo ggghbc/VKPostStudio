@@ -43,6 +43,8 @@ export interface PostItem {
 	close_comments: boolean;
 	mute_notifications: boolean;
 	mark_as_ads: boolean;
+	target_id: number;
+	target_title?: string;
 	attachments: AttachmentItem[];
 }
 
@@ -52,8 +54,10 @@ export interface SyncResult {
 }
 
 export interface FilePreview {
+	id?: number;
 	path: string;
 	name: string;
 	isImage: boolean;
 	previewUrl?: string;
+	vkAttachmentString?: string;
 }

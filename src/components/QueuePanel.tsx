@@ -1,4 +1,3 @@
-import React from "react";
 import { format } from "date-fns";
 import {
 	Clock,
@@ -49,9 +48,7 @@ interface QueuePanelProps {
 	onOpenRevertModal: (post: PostItem) => void;
 	onRescheduleNextSlot: (id: number) => void;
 	onOpenRescheduleModal: (post: PostItem) => void;
-	onDeleteLocalPost: (id: number) => void;
-	onDeleteVkPost: (id: number) => void;
-	onDeleteHistoryPost: (id: number) => void;
+	onDeletePost: (post: PostItem) => void;
 	onOpenFullImage: (url: string) => void;
 }
 
@@ -80,9 +77,7 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
 	onOpenRevertModal,
 	onRescheduleNextSlot,
 	onOpenRescheduleModal,
-	onDeleteLocalPost,
-	onDeleteVkPost,
-	onDeleteHistoryPost,
+	onDeletePost,
 	onOpenFullImage,
 }) => {
 	const t = translations[lang];
@@ -222,7 +217,10 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
 						}}
 						title={t.cleanDiskFiles}
 					>
-						<HardDriveDownload className="h-4 w-4" />
+						<HardDriveDownload
+							className="h-4 w-4"
+							style={{ color: "var(--accent)" }}
+						/>
 					</button>
 
 					<button
@@ -238,6 +236,7 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
 					>
 						<RefreshCw
 							className={`h-4 w-4 ${isSyncingVk ? "animate-spin" : ""}`}
+							style={{ color: "var(--accent)" }}
 						/>
 					</button>
 
@@ -298,13 +297,13 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
 							</span>
 						</div>
 					) : (
-						displayedPosts.map((post, index) => {
+						displayedPosts.map((post) => {
 							const isExpanded = expandedPostIds.includes(
 								post.id,
 							);
 							const isVkPost =
 								post.status === "transferred_to_vk";
-							const isHistoryTab = activeQueueTab === "history";
+							const isPublished = post.status === "archived";
 
 							return (
 								<div
@@ -322,7 +321,7 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
 										<div className="flex-1 min-w-0">
 											<div className="flex items-center gap-2.5 text-xs mb-2">
 												<span className="text-[11px] font-mono opacity-50">
-													#{index + 1}
+													#{post.id}
 												</span>
 												<span
 													className="font-semibold font-mono"
@@ -373,15 +372,19 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
 														{t.statusError}
 													</span>
 												)}
-												{post.status === "archived" && (
+												{isPublished && (
 													<span
-														className="rounded-md px-2 py-0.5 text-[10px] font-semibold opacity-70 border"
+														className="flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-semibold border"
 														style={{
+															backgroundColor:
+																"var(--accent-glow)",
 															borderColor:
-																"var(--border-light)",
+																"var(--accent)",
+															color: "var(--accent)",
 														}}
 													>
-														{t.statusArchived}
+														<CheckCircle2 className="h-3 w-3" />{" "}
+														{t.statusPublished}
 													</span>
 												)}
 
@@ -416,53 +419,19 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
 										</div>
 
 										<div className="flex items-center gap-1">
-											{isHistoryTab ? (
-												<button
-													onClick={(e) => {
-														e.stopPropagation();
-														onDeleteHistoryPost(
-															post.id,
-														);
-													}}
-													className="p-1.5 hover:text-rose-400 transition-colors"
-													style={{
-														color: "var(--text-muted)",
-													}}
-													title="Delete"
-												>
-													<Trash2 className="h-4 w-4" />
-												</button>
-											) : isVkPost ? (
-												<button
-													onClick={(e) => {
-														e.stopPropagation();
-														onDeleteVkPost(post.id);
-													}}
-													className="p-1.5 hover:text-rose-400 transition-colors"
-													style={{
-														color: "var(--text-muted)",
-													}}
-													title="Delete from VK"
-												>
-													<Trash2 className="h-4 w-4" />
-												</button>
-											) : (
-												<button
-													onClick={(e) => {
-														e.stopPropagation();
-														onDeleteLocalPost(
-															post.id,
-														);
-													}}
-													className="p-1.5 hover:text-rose-400 transition-colors"
-													style={{
-														color: "var(--text-muted)",
-													}}
-													title="Delete"
-												>
-													<Trash2 className="h-4 w-4" />
-												</button>
-											)}
+											<button
+												onClick={(e) => {
+													e.stopPropagation();
+													onDeletePost(post);
+												}}
+												className="p-1.5 hover:text-rose-400 transition-colors"
+												style={{
+													color: "var(--text-muted)",
+												}}
+												title="Delete"
+											>
+												<Trash2 className="h-4 w-4" />
+											</button>
 
 											<div className="p-1 opacity-70">
 												{isExpanded ? (

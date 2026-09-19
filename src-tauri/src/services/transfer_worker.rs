@@ -10,7 +10,7 @@ pub struct TransferWorker;
 
 fn format_vk_error(e_str: &str) -> String {
     if e_str.contains("error 5") || e_str.contains("User authorization failed") || e_str.contains("another ip address") {
-        "Требуется обновление токена: срок действия истёк или не совпадает IP-адрес/VPN (VK API error 5). Нажмите кнопку ⟳ рядом с аккаунтом в шапке.".to_string()
+        "Требуется обновление токена: срок действия истёк или не совпадает IP-адрес/VPN (VK API error 5). Откройте меню токенов и обновите токен.".to_string()
     } else if e_str.contains("error 27") || e_str.contains("Group authorization failed") {
         "VK API error 27: Требуется токен пользователя-администратора (User Token), а не токен сообщества.".to_string()
     } else {
@@ -27,6 +27,7 @@ impl TransferWorker {
     ) -> Result<()> {
         let result = Self::process_posts(&app, &db, &vk, target_id).await;
 
+        // Гарантированно эмитим завершение трансфера, чтобы снять спиннер на фронтенде
         let _ = app.emit("transfer-finished", serde_json::json!({
             "success": result.is_ok(),
             "error": result.as_ref().err().map(|e| e.to_string())
@@ -50,13 +51,13 @@ impl TransferWorker {
 
         let owner_id: i64 = target_row.get("owner_id");
         let target_type: String = target_row.get("target_type");
-        let from_group = target_type == "community";
+        let from_group = target_type == "community" || owner_id < 0;
 
         let posts = sqlx::query(
             "SELECT id, text, scheduled_at_utc, guid, signed, close_comments, mute_notifications, mark_as_ads, attachments_view_mode 
              FROM posts 
              WHERE target_id = ? AND status IN ('queued', 'failed') 
-             ORDER BY scheduled_at_utc ASC"
+             ORDER BY datetime(scheduled_at_utc) ASC"
         )
         .bind(target_id)
         .fetch_all(db)
@@ -85,9 +86,10 @@ impl TransferWorker {
                 .map_err(|e| anyhow!("Неверный формат даты поста #{}: {}", post_id, e))?;
 
             let now = Utc::now();
-            if scheduled_at <= now {
+            // ВКонтакте требует, чтобы дата отложки была в будущем минимум на 1–2 минуты
+            if scheduled_at <= (now + chrono::Duration::seconds(60)) {
                 sqlx::query("UPDATE posts SET status = 'failed', error_message = ? WHERE id = ?")
-                    .bind("Время слота уже в прошлом. Задайте новое время.")
+                    .bind("Время слота уже в прошлом или наступит менее чем через 2 минуты. Задайте новое время.")
                     .bind(post_id)
                     .execute(db)
                     .await?;

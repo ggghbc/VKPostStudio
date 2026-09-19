@@ -32,6 +32,8 @@ pub struct PostDto {
     pub close_comments: bool,
     pub mute_notifications: bool,
     pub mark_as_ads: bool,
+    pub target_id: i64,
+    pub target_title: Option<String>,
     pub attachments: Vec<AttachmentDto>,
 }
 
@@ -39,6 +41,15 @@ pub struct PostDto {
 pub struct SyncResultDto {
     pub posts: Vec<PostDto>,
     pub group_auth_restricted: bool,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct UpdateAttachmentInput {
+    pub id: Option<i64>,
+    pub local_path: Option<String>,
+    pub file_name: String,
+    pub vk_attachment_string: Option<String>,
+    pub thumb_data: Option<String>,
 }
 
 fn get_thumbs_dir(app: &AppHandle) -> PathBuf {
@@ -60,14 +71,52 @@ fn map_post_row(r: &sqlx::sqlite::SqliteRow, attachments: Vec<AttachmentDto>) ->
         close_comments: r.try_get::<i64, _>("close_comments").unwrap_or(0) == 1,
         mute_notifications: r.try_get::<i64, _>("mute_notifications").unwrap_or(0) == 1,
         mark_as_ads: r.try_get::<i64, _>("mark_as_ads").unwrap_or(0) == 1,
+        target_id: r.try_get("target_id").unwrap_or(0),
+        target_title: r.try_get("target_title").ok(),
         attachments,
     }
+}
+
+async fn get_attachments_for_post(db: &sqlx::SqlitePool, post_id: i64, thumbs_dir: &PathBuf) -> Vec<AttachmentDto> {
+    let att_rows = sqlx::query(
+        "SELECT id, file_name, size_bytes, local_path, vk_attachment_string 
+         FROM attachments WHERE post_id = ? ORDER BY order_index ASC"
+    )
+    .bind(post_id)
+    .fetch_all(db)
+    .await
+    .unwrap_or_default();
+
+    let mut attachments = Vec::new();
+    for a in att_rows {
+        let att_id: i64 = a.get("id");
+        let local_path: Option<String> = a.get("local_path");
+        let thumb_path = thumbs_dir.join(format!("{}.thumb", att_id));
+        let thumb_data = if thumb_path.exists() {
+            std::fs::read_to_string(&thumb_path).ok()
+        } else if let Some(ref lp) = local_path {
+            let p = PathBuf::from(lp);
+            if p.exists() { get_file_preview_base64(lp.clone()).await.ok() } else { None }
+        } else {
+            None
+        };
+
+        attachments.push(AttachmentDto {
+            id: att_id,
+            file_name: a.get("file_name"),
+            size_bytes: a.get("size_bytes"),
+            local_path,
+            vk_attachment_string: a.get("vk_attachment_string"),
+            thumb_data,
+        });
+    }
+    attachments
 }
 
 #[tauri::command]
 pub async fn get_queue(target_id: i64, app: AppHandle, state: State<'_, AppState>) -> Result<Vec<PostDto>, String> {
     let posts_rows = sqlx::query(
-        "SELECT p.id, p.text, p.scheduled_at_utc, p.status, p.error_message, p.attachments_view_mode,
+        "SELECT p.id, p.target_id, t.title as target_title, p.text, p.scheduled_at_utc, p.status, p.error_message, p.attachments_view_mode,
                 p.signed, p.close_comments, p.mute_notifications, p.mark_as_ads 
          FROM posts p
          JOIN targets t ON p.target_id = t.id
@@ -84,39 +133,7 @@ pub async fn get_queue(target_id: i64, app: AppHandle, state: State<'_, AppState
 
     for r in posts_rows {
         let post_id: i64 = r.get("id");
-        let att_rows = sqlx::query(
-            "SELECT id, file_name, size_bytes, local_path, vk_attachment_string 
-             FROM attachments WHERE post_id = ? ORDER BY order_index ASC"
-        )
-        .bind(post_id)
-        .fetch_all(&state.db)
-        .await
-        .unwrap_or_default();
-
-        let mut attachments = Vec::new();
-        for a in att_rows {
-            let att_id: i64 = a.get("id");
-            let local_path: Option<String> = a.get("local_path");
-            let thumb_path = thumbs_dir.join(format!("{}.thumb", att_id));
-            let thumb_data = if thumb_path.exists() {
-                std::fs::read_to_string(&thumb_path).ok()
-            } else if let Some(ref lp) = local_path {
-                let p = PathBuf::from(lp);
-                if p.exists() { get_file_preview_base64(lp.clone()).await.ok() } else { None }
-            } else {
-                None
-            };
-
-            attachments.push(AttachmentDto {
-                id: att_id,
-                file_name: a.get("file_name"),
-                size_bytes: a.get("size_bytes"),
-                local_path,
-                vk_attachment_string: a.get("vk_attachment_string"),
-                thumb_data,
-            });
-        }
-
+        let attachments = get_attachments_for_post(&state.db, post_id, &thumbs_dir).await;
         result.push(map_post_row(&r, attachments));
     }
 
@@ -126,7 +143,7 @@ pub async fn get_queue(target_id: i64, app: AppHandle, state: State<'_, AppState
 #[tauri::command]
 pub async fn get_post_history(target_id: i64, app: AppHandle, state: State<'_, AppState>) -> Result<Vec<PostDto>, String> {
     let posts_rows = sqlx::query(
-        "SELECT p.id, p.text, p.scheduled_at_utc, p.status, p.error_message, p.attachments_view_mode,
+        "SELECT p.id, p.target_id, t.title as target_title, p.text, p.scheduled_at_utc, p.status, p.error_message, p.attachments_view_mode,
                 p.signed, p.close_comments, p.mute_notifications, p.mark_as_ads 
          FROM posts p
          JOIN targets t ON p.target_id = t.id
@@ -143,39 +160,34 @@ pub async fn get_post_history(target_id: i64, app: AppHandle, state: State<'_, A
 
     for r in posts_rows {
         let post_id: i64 = r.get("id");
-        let att_rows = sqlx::query(
-            "SELECT id, file_name, size_bytes, local_path, vk_attachment_string 
-             FROM attachments WHERE post_id = ? ORDER BY order_index ASC"
-        )
-        .bind(post_id)
-        .fetch_all(&state.db)
-        .await
-        .unwrap_or_default();
+        let attachments = get_attachments_for_post(&state.db, post_id, &thumbs_dir).await;
+        result.push(map_post_row(&r, attachments));
+    }
 
-        let mut attachments = Vec::new();
-        for a in att_rows {
-            let att_id: i64 = a.get("id");
-            let local_path: Option<String> = a.get("local_path");
-            let thumb_path = thumbs_dir.join(format!("{}.thumb", att_id));
-            let thumb_data = if thumb_path.exists() {
-                std::fs::read_to_string(&thumb_path).ok()
-            } else if let Some(ref lp) = local_path {
-                let p = PathBuf::from(lp);
-                if p.exists() { get_file_preview_base64(lp.clone()).await.ok() } else { None }
-            } else {
-                None
-            };
+    Ok(result)
+}
 
-            attachments.push(AttachmentDto {
-                id: att_id,
-                file_name: a.get("file_name"),
-                size_bytes: a.get("size_bytes"),
-                local_path,
-                vk_attachment_string: a.get("vk_attachment_string"),
-                thumb_data,
-            });
-        }
+// Запрос ВСЕХ постов приложения со всех сообществ с информацией о цели
+#[tauri::command]
+pub async fn get_all_posts(app: AppHandle, state: State<'_, AppState>) -> Result<Vec<PostDto>, String> {
+    let posts_rows = sqlx::query(
+        "SELECT p.id, p.target_id, COALESCE(t.title, 'Неизвестная цель') as target_title, 
+                p.text, p.scheduled_at_utc, p.status, p.error_message, p.attachments_view_mode,
+                p.signed, p.close_comments, p.mute_notifications, p.mark_as_ads 
+         FROM posts p
+         LEFT JOIN targets t ON p.target_id = t.id
+         ORDER BY p.id DESC"
+    )
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| e.to_string())?;
 
+    let thumbs_dir = get_thumbs_dir(&app);
+    let mut result = Vec::new();
+
+    for r in posts_rows {
+        let post_id: i64 = r.get("id");
+        let attachments = get_attachments_for_post(&state.db, post_id, &thumbs_dir).await;
         result.push(map_post_row(&r, attachments));
     }
 
@@ -429,6 +441,7 @@ pub async fn delete_history_post(post_id: i64, state: State<'_, AppState>) -> Re
     Ok(())
 }
 
+// Обновление поста с точной синхронизацией вложений
 #[tauri::command]
 pub async fn update_post(
     post_id: i64,
@@ -438,7 +451,7 @@ pub async fn update_post(
     mute_notifications: bool,
     mark_as_ads: bool,
     attachments_view_mode: String,
-    file_paths: Vec<String>,
+    attachments: Vec<UpdateAttachmentInput>,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
@@ -458,31 +471,39 @@ pub async fn update_post(
     .await
     .map_err(|e| e.to_string())?;
 
-    if !file_paths.is_empty() {
-        sqlx::query("DELETE FROM attachments WHERE post_id = ?").bind(post_id).execute(&mut *tx).await.map_err(|e| e.to_string())?;
+    // Всегда полностью очищаем старые вложения и сохраняем актуальный набор из редактора
+    sqlx::query("DELETE FROM attachments WHERE post_id = ?")
+        .bind(post_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?;
 
-        let thumbs_dir = get_thumbs_dir(&app);
-        for (idx, path_str) in file_paths.iter().enumerate() {
-            let p = std::path::Path::new(path_str);
-            let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("file");
-            let size = std::fs::metadata(p).map(|m| m.len() as i64).unwrap_or(0);
+    let thumbs_dir = get_thumbs_dir(&app);
 
-            let att_id = sqlx::query(
-                "INSERT INTO attachments (post_id, local_path, file_name, size_bytes, attachment_kind, order_index)
-                 VALUES (?, ?, ?, ?, 'photo', ?) RETURNING id"
-            )
-            .bind(post_id)
-            .bind(path_str)
-            .bind(name)
-            .bind(size)
-            .bind(idx as i32)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(|e| e.to_string())?
-            .get::<i64, _>("id");
+    for (idx, att) in attachments.iter().enumerate() {
+        let is_uploaded = att.vk_attachment_string.is_some();
+        let upload_status = if is_uploaded { "uploaded" } else { "pending" };
 
-            if let Ok(b64) = get_file_preview_base64(path_str.clone()).await {
-                let thumb_path = thumbs_dir.join(format!("{}.thumb", att_id));
+        let att_id = sqlx::query(
+            "INSERT INTO attachments (post_id, local_path, file_name, size_bytes, attachment_kind, upload_status, vk_attachment_string, order_index)
+             VALUES (?, ?, ?, 0, 'photo', ?, ?, ?) RETURNING id"
+        )
+        .bind(post_id)
+        .bind(&att.local_path)
+        .bind(&att.file_name)
+        .bind(upload_status)
+        .bind(&att.vk_attachment_string)
+        .bind(idx as i32)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?
+        .get::<i64, _>("id");
+
+        let thumb_path = thumbs_dir.join(format!("{}.thumb", att_id));
+        if let Some(ref b64) = att.thumb_data {
+            let _ = std::fs::write(&thumb_path, b64);
+        } else if let Some(ref lp) = att.local_path {
+            if let Ok(b64) = get_file_preview_base64(lp.clone()).await {
                 let _ = std::fs::write(&thumb_path, b64);
             }
         }

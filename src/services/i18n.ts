@@ -1,6 +1,113 @@
 export type Lang = "ru" | "en";
 
-export const translations = {
+export interface TranslationSchema {
+	appTitle: string;
+	token: string;
+	addToken: string;
+	noTokens: string;
+	target: string;
+	settings: string;
+	createPost: string;
+	editPost: string;
+	editMode: string;
+	postTextPlaceholder: string;
+	symbols: string;
+	dropzoneTitle: string;
+	dropzoneSub: string;
+	attachedFiles: string;
+	mediaLimit: string;
+	batchModeBtn: string;
+	addMore: string;
+	position: string;
+	pubSettings: string;
+	mediaStyle: string;
+	mediaStyleSub: string;
+	grid: string;
+	carousel: string;
+	comments: string;
+	notifications: string;
+	notificationsSub: string;
+	authorSign: string;
+	authorSignSub: string;
+	adsMark: string;
+	adsMarkSub: string;
+	manualTimeToggle: string;
+	pubTime: string;
+	apply: string;
+	cancel: string;
+	addToQueue: string;
+	saveChanges: string;
+	noFreeSlots: string;
+	selectTarget: string;
+	localQueue: string;
+	vkDelayed: string;
+	history: string;
+	allPostsTab: string;
+	emptyQueue: string;
+	emptyVk: string;
+	emptyHistory: string;
+	emptyAllPosts: string;
+	actions: string;
+	toEditor: string;
+	revertToLocal: string;
+	nextSlot: string;
+	setTime: string;
+	statusLocal: string;
+	statusVk: string;
+	statusError: string;
+	statusArchived: string;
+	statusPublished: string;
+	noAttachments: string;
+	sendToVk: string;
+	sending: string;
+	cleanDiskFiles: string;
+	revertSameTime: string;
+	revertNextSlot: string;
+	saveTime: string;
+	selectPubTime: string;
+	savePattern: string;
+	patternName: string;
+	timesCsv: string;
+	intervalDays: string;
+	intervalDaysHint: string;
+	createPatternTitle: string;
+	settingsTitle: string;
+	themeTitle: string;
+	themePastel: string;
+	themeOcean: string;
+	themePink: string;
+	themeEarthy: string;
+	themeSteel: string;
+	langTitle: string;
+	backupDb: string;
+	cleanExpiredTokens: string;
+	batchTitle: string;
+	batchDropzone: string;
+	batchDropzoneSub: string;
+	batchFilesSelected: string;
+	batchScheme: string;
+	batchTextLabel: string;
+	batchSubmit: string;
+	sortBy: string;
+	sortIdDesc: string;
+	sortIdAsc: string;
+	sortDateAsc: string;
+	sortDateDesc: string;
+	sortStatus: string;
+	groupBy: string;
+	groupNone: string;
+	groupByTarget: string;
+	groupByStatus: string;
+	targetLabel: string;
+	deleteConfirmTitle: string;
+	deleteConfirmText: string;
+	dontAskSession: string;
+	confirmDelete: string;
+	cleanSuccess: string;
+	cleanExplain: string;
+}
+
+export const translations: Record<Lang, TranslationSchema> = {
 	ru: {
 		appTitle: "VK Post Studio",
 		token: "Токен:",
@@ -17,7 +124,7 @@ export const translations = {
 		dropzoneSub: "или нажмите для выбора файлов (до 10 шт.)",
 		attachedFiles: "Прикрепленные файлы",
 		mediaLimit: "медиа",
-		batchGen: "Пакетная генерация",
+		batchModeBtn: "Пакетный постинг",
 		addMore: "Добавить еще",
 		position: "позиция",
 		pubSettings: "Настройки публикации",
@@ -44,9 +151,11 @@ export const translations = {
 		localQueue: "Локальная",
 		vkDelayed: "Отложка ВК",
 		history: "История",
+		allPostsTab: "Все посты",
 		emptyQueue: "Очередь пуста",
 		emptyVk: "В отложке ВК нет постов",
 		emptyHistory: "История постов пуста",
+		emptyAllPosts: "В базе данных нет постов",
 		actions: "Действия:",
 		toEditor: "В редактор",
 		revertToLocal: "Вернуть в локальную очередь",
@@ -56,6 +165,7 @@ export const translations = {
 		statusVk: "В отложке ВК",
 		statusError: "Ошибка",
 		statusArchived: "Архив",
+		statusPublished: "Опубликован в ВК",
 		noAttachments: "Вложений нет",
 		sendToVk: "Отправить в ВК",
 		sending: "Отправка...",
@@ -82,6 +192,31 @@ export const translations = {
 		langTitle: "Язык интерфейса",
 		backupDb: "Создать резервную копию базы данных",
 		cleanExpiredTokens: "Удалить недействительные токены",
+		batchTitle: "Пакетная генерация очереди",
+		batchDropzone: "Перетащите неограниченное число изображений",
+		batchDropzoneSub: "или нажмите для выбора сразу десятков файлов",
+		batchFilesSelected: "Выбрано файлов:",
+		batchScheme: "Схема разделения постов:",
+		batchTextLabel: "Общий текст для каждого поста (необязательно):",
+		batchSubmit: "Сгенерировать посты в очередь",
+		sortBy: "Сортировка:",
+		sortIdDesc: "ID (новые)",
+		sortIdAsc: "ID (старые)",
+		sortDateAsc: "По дате (раньше)",
+		sortDateDesc: "По дате (позже)",
+		sortStatus: "По статусу",
+		groupBy: "Группировка:",
+		groupNone: "Без группировки",
+		groupByTarget: "По цели",
+		groupByStatus: "По статусу",
+		targetLabel: "Цель:",
+		deleteConfirmTitle: "Подтверждение удаления",
+		deleteConfirmText: "Вы действительно хотите удалить этот пост?",
+		dontAskSession: "Не спрашивать в текущей сессии",
+		confirmDelete: "Удалить",
+		cleanSuccess: "Успешно удалено файлов:",
+		cleanExplain:
+			"Будут удалены исходные локальные файлы картинок с вашего диска только для тех постов, которые уже успешно находятся в отложке ВК. Превью в приложении сохранятся.",
 	},
 	en: {
 		appTitle: "VK Post Studio",
@@ -99,7 +234,7 @@ export const translations = {
 		dropzoneSub: "or click to select files (up to 10)",
 		attachedFiles: "Attached files",
 		mediaLimit: "media",
-		batchGen: "Batch generate",
+		batchModeBtn: "Batch Mode",
 		addMore: "Add more",
 		position: "pos",
 		pubSettings: "Publication Settings",
@@ -123,11 +258,13 @@ export const translations = {
 		noFreeSlots: "No available slots",
 		selectTarget: "Select target",
 		localQueue: "Local",
-		vkDelayed: "VK Delayed",
+		vkDelayed: "VK Postponed",
 		history: "History",
+		allPostsTab: "All Posts",
 		emptyQueue: "Queue is empty",
 		emptyVk: "No postponed posts in VK",
 		emptyHistory: "Post history is empty",
+		emptyAllPosts: "No posts in database",
 		actions: "Actions:",
 		toEditor: "To Editor",
 		revertToLocal: "Revert to local queue",
@@ -137,6 +274,7 @@ export const translations = {
 		statusVk: "VK Postponed",
 		statusError: "Error",
 		statusArchived: "Archived",
+		statusPublished: "Published in VK",
 		noAttachments: "No attachments",
 		sendToVk: "Send to VK",
 		sending: "Sending...",
@@ -162,5 +300,30 @@ export const translations = {
 		langTitle: "Language",
 		backupDb: "Create database backup",
 		cleanExpiredTokens: "Delete invalid tokens",
+		batchTitle: "Batch Queue Generator",
+		batchDropzone: "Drop unlimited images here",
+		batchDropzoneSub: "or click to select dozens of files",
+		batchFilesSelected: "Files selected:",
+		batchScheme: "Split scheme:",
+		batchTextLabel: "Shared text for every post (optional):",
+		batchSubmit: "Generate Queue",
+		sortBy: "Sort:",
+		sortIdDesc: "ID (newest)",
+		sortIdAsc: "ID (oldest)",
+		sortDateAsc: "Date (earliest)",
+		sortDateDesc: "Date (latest)",
+		sortStatus: "By Status",
+		groupBy: "Group:",
+		groupNone: "None",
+		groupByTarget: "By Target",
+		groupByStatus: "By Status",
+		targetLabel: "Target:",
+		deleteConfirmTitle: "Confirm deletion",
+		deleteConfirmText: "Are you sure you want to delete this post?",
+		dontAskSession: "Do not ask again in this session",
+		confirmDelete: "Delete",
+		cleanSuccess: "Successfully freed files:",
+		cleanExplain:
+			"Original local image files will be removed from your disk only for posts already postponed to VK. Thumbnails in the app will be preserved.",
 	},
 };

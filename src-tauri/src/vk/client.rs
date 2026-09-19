@@ -319,11 +319,14 @@ impl VkClient {
             .await
             .with_context(|| format!("Не удалось прочитать файл: {:?}", file_path))?;
 
-        let file_name = file_path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("photo.jpg")
-            .to_string();
+        let ext = file_path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("jpg")
+            .to_lowercase();
+
+        // Безопасное латинское имя файла исключает сбои Apache/Nginx сервера загрузки VK
+        let safe_name = format!("upload_{}.{}", rand::random::<u32>(), ext);
 
         let is_group = target_owner_id < 0;
         let group_id_str = target_owner_id.abs().to_string();
@@ -338,9 +341,10 @@ impl VkClient {
 
         let srv: UploadServerResponse = self
             .post_vk("photos.getWallUploadServer", server_params)
-            .await?;
+            .await
+            .context("Ошибка при получении адреса сервера загрузки фото")?;
 
-        let mime_type = match file_path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase().as_str() {
+        let mime_type = match ext.as_str() {
             "png" => "image/png",
             "webp" => "image/webp",
             "gif" => "image/gif",
@@ -348,7 +352,7 @@ impl VkClient {
         };
 
         let part = multipart::Part::bytes(file_bytes)
-            .file_name(file_name)
+            .file_name(safe_name)
             .mime_str(mime_type)?;
 
         let form = multipart::Form::new().part("photo", part);
@@ -385,6 +389,10 @@ impl VkClient {
             })
             .ok_or_else(|| anyhow!("Ответ загрузчика не содержит photo: {:?}", upload_raw))?;
 
+        if photo == "[]" || photo == "\"[]\"" || photo.trim().is_empty() {
+            return Err(anyhow!("VK Upload Server не смог обработать файл (пустой ответ)"));
+        }
+
         let hash = upload_raw
             .get("hash")
             .and_then(|v| v.as_str())
@@ -401,6 +409,8 @@ impl VkClient {
 
         if is_group {
             save_params.push(("group_id", group_id_str));
+        } else if target_owner_id > 0 {
+            save_params.push(("user_id", target_owner_id.to_string()));
         }
 
         let saved_raw: serde_json::Value = self
@@ -468,7 +478,6 @@ impl VkClient {
 
         if !attachments_str.is_empty() {
             params.push(("attachments", attachments_str));
-            // Официальный параметр API VK: primary_attachments_mode ('grid' | 'carousel')
             params.push(("primary_attachments_mode", mode.to_string()));
         }
 

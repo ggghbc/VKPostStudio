@@ -5,6 +5,7 @@
 /* 1. Pastel Dreamland Adventure: ["#cdb4db","#ffc8dd","#ffafcc","#bde0fe","#a2d2ff"] */
 :root,
 [data-theme="pastel"] {
+	color-scheme: dark;
 	--bg-app: #181420;
 	--bg-header: #211b2c;
 	--bg-surface: #282136;
@@ -12,29 +13,30 @@
 	--bg-surface-hover: #43375c;
 	--border-app: #463b5e;
 	--border-light: #5e4f7e;
-	--text-app: #fdf6fa;
-	--text-muted: #ffc8dd;
+	--text-app: #ffc8dd;
+	--text-muted: #bde0fe;
 	--text-dim: #cdb4db;
 	--accent: #ffafcc;
 	--accent-hover: #ffc8dd;
 	--accent-glow: rgba(255, 175, 204, 0.25);
 	--btn-primary-bg: #a2d2ff;
-	--btn-primary-text: #17131e;
+	--btn-primary-text: #181420;
 	--btn-primary-hover: #bde0fe;
 	--btn-secondary-bg: #342a47;
 	--btn-secondary-border: #5e4f7e;
 	--btn-secondary-text: #ffc8dd;
 	--tab-active-bg: #ffafcc;
-	--tab-active-text: #17131e;
+	--tab-active-text: #181420;
 }
 
 /* 2. Ocean Breeze: ["#03045e","#0077b6","#00b4d8","#90e0ef","#caf0f8"] */
 [data-theme="ocean"] {
+	color-scheme: dark;
 	--bg-app: #03045e;
-	--bg-header: #020340;
-	--bg-surface: #071569;
-	--bg-surface-sub: #0077b6;
-	--bg-surface-hover: #0096c7;
+	--bg-header: #03045e;
+	--bg-surface: #03045e;
+	--bg-surface-sub: #07176b;
+	--bg-surface-hover: #0077b6;
 	--border-app: #0077b6;
 	--border-light: #00b4d8;
 	--text-app: #caf0f8;
@@ -46,40 +48,42 @@
 	--btn-primary-bg: #00b4d8;
 	--btn-primary-text: #03045e;
 	--btn-primary-hover: #90e0ef;
-	--btn-secondary-bg: #071569;
+	--btn-secondary-bg: #07176b;
 	--btn-secondary-border: #0077b6;
 	--btn-secondary-text: #caf0f8;
 	--tab-active-bg: #00b4d8;
 	--tab-active-text: #03045e;
 }
 
-/* 3. Soft Pink Delight (Светлая нежная тема): ["#ffe5ec","#ffc2d1","#ffb3c6","#ff8fab","#fb6f92"] */
+/* 3. Soft Pink Delight: ["#ffe5ec","#ffc2d1","#ffb3c6","#ff8fab","#fb6f92"] */
 [data-theme="pink"] {
+	color-scheme: light;
 	--bg-app: #ffe5ec;
-	--bg-header: #ffffff;
-	--bg-surface: #ffffff;
-	--bg-surface-sub: #ffc2d1;
-	--bg-surface-hover: #ffb3c6;
+	--bg-header: #ffc2d1;
+	--bg-surface: #ffc2d1;
+	--bg-surface-sub: #ffb3c6;
+	--bg-surface-hover: #ff8fab;
 	--border-app: #ffb3c6;
 	--border-light: #ff8fab;
-	--text-app: #4a1525;
-	--text-muted: #732239;
-	--text-dim: #a63253;
+	--text-app: #fb6f92;
+	--text-muted: #fb6f92;
+	--text-dim: #ff8fab;
 	--accent: #fb6f92;
 	--accent-hover: #ff8fab;
 	--accent-glow: rgba(251, 111, 146, 0.25);
 	--btn-primary-bg: #fb6f92;
-	--btn-primary-text: #ffffff;
+	--btn-primary-text: #ffe5ec;
 	--btn-primary-hover: #ff8fab;
-	--btn-secondary-bg: #ffffff;
-	--btn-secondary-border: #ffb3c6;
-	--btn-secondary-text: #4a1525;
+	--btn-secondary-bg: #ffc2d1;
+	--btn-secondary-border: #ff8fab;
+	--btn-secondary-text: #fb6f92;
 	--tab-active-bg: #fb6f92;
-	--tab-active-text: #ffffff;
+	--tab-active-text: #ffe5ec;
 }
 
 /* 4. Earthy Green: ["#cad2c5","#84a98c","#52796f","#354f52","#2f3e46"] */
 [data-theme="earthy"] {
+	color-scheme: dark;
 	--bg-app: #222d32;
 	--bg-header: #1b2428;
 	--bg-surface: #2f3e46;
@@ -87,24 +91,25 @@
 	--bg-surface-hover: #405e61;
 	--border-app: #354f52;
 	--border-light: #52796f;
-	--text-app: #f4f6f3;
-	--text-muted: #cad2c5;
-	--text-dim: #84a98c;
+	--text-app: #cad2c5;
+	--text-muted: #84a98c;
+	--text-dim: #52796f;
 	--accent: #84a98c;
 	--accent-hover: #cad2c5;
 	--accent-glow: rgba(132, 169, 140, 0.25);
 	--btn-primary-bg: #52796f;
-	--btn-primary-text: #f4f6f3;
+	--btn-primary-text: #cad2c5;
 	--btn-primary-hover: #84a98c;
 	--btn-secondary-bg: #354f52;
 	--btn-secondary-border: #52796f;
 	--btn-secondary-text: #cad2c5;
 	--tab-active-bg: #84a98c;
-	--tab-active-text: #222d32;
+	--tab-active-text: #2f3e46;
 }
 
 /* 5. Light Steel: ["#f8f9fa","#e9ecef","#dee2e6","#ced4da","#adb5bd","#6c757d","#495057","#343a40","#212529"] */
 [data-theme="steel"] {
+	color-scheme: light;
 	--bg-app: #f8f9fa;
 	--bg-header: #ffffff;
 	--bg-surface: #ffffff;
@@ -119,13 +124,13 @@
 	--accent-hover: #212529;
 	--accent-glow: rgba(52, 58, 64, 0.15);
 	--btn-primary-bg: #343a40;
-	--btn-primary-text: #ffffff;
+	--btn-primary-text: #f8f9fa;
 	--btn-primary-hover: #212529;
 	--btn-secondary-bg: #e9ecef;
 	--btn-secondary-border: #ced4da;
 	--btn-secondary-text: #212529;
 	--tab-active-bg: #343a40;
-	--tab-active-text: #ffffff;
+	--tab-active-text: #f8f9fa;
 }
 
 html,
@@ -143,14 +148,35 @@ body,
 	user-select: none;
 }
 
-/* Глобальная темизация выпадающих списков и пунктов меню */
+/* Глобальное оформление полей ввода и плейсхолдеров */
+input,
+textarea,
 select {
-	background-color: var(--bg-surface-sub);
-	color: var(--text-app);
-	border-color: var(--border-light);
+	color: var(--text-app) !important;
+	background-color: var(--bg-surface-sub) !important;
+	border-color: var(--border-light) !important;
 }
 
-option {
-	background-color: var(--bg-surface);
-	color: var(--text-app);
+input::placeholder,
+textarea::placeholder {
+	color: var(--text-dim) !important;
+	opacity: 0.85 !important;
+}
+
+/* Выпадающие списки и пункты меню */
+select {
+	cursor: pointer;
+}
+
+select option {
+	background-color: var(--bg-surface) !important;
+	color: var(--text-app) !important;
+	padding: 6px 10px;
+}
+
+select option:hover,
+select option:focus,
+select option:checked {
+	background-color: var(--accent) !important;
+	color: var(--btn-primary-text) !important;
 }

@@ -139,12 +139,12 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 	const getCustomDisplayString = () => {
 		const d = new Date(selectedDate);
 		d.setHours(pickerHours, pickerMinutes, 0, 0);
-		return format(d, "dd/MM/yyyy HH:mm");
+		return format(d, "dd/MM/yy - HH:mm");
 	};
 
 	return (
 		<section
-			className={`flex flex-col border-r p-6 overflow-y-auto transition-all duration-300 ease-in-out ${
+			className={`flex flex-col border-r p-4 sm:p-5 overflow-y-auto transition-all duration-300 ease-in-out ${
 				isRightPanelOpen
 					? "w-1/2"
 					: "w-full max-w-4xl mx-auto border-r-0"
@@ -154,7 +154,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 				borderColor: "var(--border-app)",
 			}}
 		>
-			<div className="mb-3 flex items-center justify-between">
+			<div className="mb-2 flex items-center justify-between flex-shrink-0">
 				<div className="flex items-center gap-2">
 					<h2
 						className="text-sm font-semibold tracking-wide"
@@ -164,7 +164,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 							? `${t.editPost} #${editingPostId}`
 							: t.createPost}
 					</h2>
-					{editingPostId && (
+					{editingPostId ? (
 						<span
 							className="px-2 py-0.5 rounded border text-[10px] font-semibold"
 							style={{
@@ -175,6 +175,21 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 						>
 							{t.editMode}
 						</span>
+					) : (
+						/* Отдельная кнопка вызова пакетного режима */
+						<button
+							onClick={onOpenBatchModal}
+							className="flex items-center gap-1 text-[11px] font-semibold px-2.5 py-0.5 rounded-lg border hover:opacity-80 transition-all"
+							style={{
+								backgroundColor: "var(--bg-surface-sub)",
+								borderColor: "var(--border-light)",
+								color: "var(--accent)",
+							}}
+							title={t.batchTitle}
+						>
+							<Layers3 className="h-3.5 w-3.5" />
+							<span>{t.batchModeBtn}</span>
+						</button>
 					)}
 				</div>
 
@@ -199,7 +214,14 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 							}
 						>
 							{patterns.map((p) => (
-								<option key={p.id} value={p.id}>
+								<option
+									key={p.id}
+									value={p.id}
+									style={{
+										backgroundColor: "var(--bg-surface)",
+										color: "var(--text-app)",
+									}}
+								>
 									{p.name}{" "}
 									{p.interval_days > 1
 										? `(раз в ${p.interval_days} дн.)`
@@ -224,9 +246,9 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 				</div>
 			</div>
 
-			<div className="mb-3">
+			<div className="mb-2 flex-shrink-0">
 				<textarea
-					className="w-full h-16 min-h-[4rem] max-h-32 rounded-xl p-3 text-xs border focus:outline-none transition-colors resize-none overflow-y-auto leading-relaxed"
+					className="w-full h-14 min-h-[3.5rem] max-h-24 rounded-xl p-2.5 text-xs border focus:outline-none transition-colors resize-none overflow-y-auto leading-relaxed"
 					style={{
 						backgroundColor: "var(--bg-surface-sub)",
 						color: "var(--text-app)",
@@ -237,9 +259,9 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 					maxLength={15895}
 					onChange={(e) => onTextChange(e.target.value)}
 				/>
-				<div className="flex justify-end mt-1 px-1">
+				<div className="flex justify-end px-1">
 					<span
-						className="text-[10px] font-mono"
+						className="text-[10px] font-mono font-medium"
 						style={{ color: "var(--text-dim)" }}
 					>
 						{postText.length} / 15 895 {t.symbols}
@@ -247,13 +269,14 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 				</div>
 			</div>
 
-			<div className="flex-1 flex flex-col min-h-[190px]">
+			{/* Обычный режим: строго до 10 файлов на один пост */}
+			<div className="flex-1 flex flex-col min-h-[140px] max-h-[220px] mb-2 flex-shrink-0">
 				{attachedFiles.length === 0 ? (
 					<div
 						onClick={onSelectFiles}
 						onDragOver={(e) => e.preventDefault()}
 						onDragEnter={(e) => e.preventDefault()}
-						className={`flex-1 flex flex-col items-center justify-center border-2 border-dashed rounded-2xl cursor-pointer p-6 transition-all ${
+						className={`flex-1 flex flex-col items-center justify-center border-2 border-dashed rounded-2xl cursor-pointer p-4 transition-all ${
 							isDraggingOver ? "scale-[0.99]" : "hover:opacity-80"
 						}`}
 						style={{
@@ -264,13 +287,13 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 						}}
 					>
 						<div
-							className="p-3.5 rounded-2xl mb-3 shadow-inner"
+							className="p-2.5 rounded-2xl mb-2 shadow-inner"
 							style={{
 								backgroundColor: "var(--bg-surface)",
 								color: "var(--accent)",
 							}}
 						>
-							<UploadCloud className="h-7 w-7" />
+							<UploadCloud className="h-6 w-6" />
 						</div>
 						<span
 							className="text-xs font-semibold"
@@ -279,7 +302,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 							{t.dropzoneTitle}
 						</span>
 						<span
-							className="text-[11px] mt-1"
+							className="text-[11px] mt-0.5"
 							style={{ color: "var(--text-dim)" }}
 						>
 							{t.dropzoneSub}
@@ -287,14 +310,14 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 					</div>
 				) : (
 					<div
-						className="flex-1 flex flex-col border rounded-2xl p-3.5 overflow-hidden"
+						className="flex-1 flex flex-col border rounded-2xl p-2.5 overflow-hidden"
 						style={{
 							backgroundColor: "var(--bg-surface-sub)",
 							borderColor: "var(--border-light)",
 						}}
 					>
 						<div
-							className="flex items-center justify-between pb-2 mb-2 border-b text-xs"
+							className="flex items-center justify-between pb-1.5 mb-1.5 border-b text-xs"
 							style={{ borderColor: "var(--border-light)" }}
 						>
 							<div className="flex items-center gap-2">
@@ -316,43 +339,24 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 								</span>
 							</div>
 
-							<div className="flex items-center gap-2">
-								{!editingPostId && attachedFiles.length > 1 && (
-									<button
-										onClick={onOpenBatchModal}
-										className="flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-lg border hover:opacity-80 transition-opacity"
-										style={{
-											backgroundColor:
-												"var(--bg-surface)",
-											borderColor: "var(--border-light)",
-											color: "var(--text-app)",
-										}}
-										title={t.batchGen}
-									>
-										<Layers3 className="h-3.5 w-3.5" />
-										<span>{t.batchGen}</span>
-									</button>
-								)}
-
-								<button
-									onClick={onSelectFiles}
-									disabled={attachedFiles.length >= 10}
-									className="flex items-center gap-1 text-[11px] font-medium disabled:opacity-40 hover:opacity-80 transition-opacity"
-									style={{ color: "var(--accent)" }}
-								>
-									<ImagePlus className="h-3.5 w-3.5" />
-									<span>{t.addMore}</span>
-								</button>
-							</div>
+							<button
+								onClick={onSelectFiles}
+								disabled={attachedFiles.length >= 10}
+								className="flex items-center gap-1 text-[11px] font-medium disabled:opacity-40 hover:opacity-80 transition-opacity"
+								style={{ color: "var(--accent)" }}
+							>
+								<ImagePlus className="h-3.5 w-3.5" />
+								<span>{t.addMore}</span>
+							</button>
 						</div>
 
 						<div
-							className={`flex-1 overflow-y-auto grid gap-3 pr-1 select-none ${isRightPanelOpen ? "grid-cols-3" : "grid-cols-4"}`}
+							className={`flex-1 overflow-y-auto grid gap-2.5 pr-1 select-none ${isRightPanelOpen ? "grid-cols-3" : "grid-cols-4"}`}
 						>
 							{attachedFiles.map((file, idx) => (
 								<div
 									key={`${file.path}_${idx}`}
-									className="group relative h-28 rounded-xl border overflow-hidden shadow-md flex items-center justify-center transition-all"
+									className="group relative h-24 rounded-xl border overflow-hidden shadow-md flex items-center justify-center transition-all"
 									style={{
 										backgroundColor: "var(--bg-surface)",
 										borderColor: "var(--border-light)",
@@ -377,13 +381,13 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 											className="flex flex-col items-center p-2 text-center cursor-pointer"
 										>
 											<FileText
-												className="h-7 w-7 mb-1"
+												className="h-6 w-6 mb-1"
 												style={{
 													color: "var(--accent)",
 												}}
 											/>
 											<span
-												className="text-[10px] truncate max-w-[90px]"
+												className="text-[10px] truncate max-w-[80px]"
 												style={{
 													color: "var(--text-muted)",
 												}}
@@ -393,18 +397,18 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 										</div>
 									)}
 
-									<span className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-black/70 text-[10px] font-mono text-white font-bold backdrop-blur-sm">
+									<span className="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-black/70 text-[9px] font-mono text-white font-bold backdrop-blur-sm">
 										#{idx + 1}
 									</span>
 
-									<div className="absolute inset-x-0 bottom-0 py-1 bg-black/80 backdrop-blur-sm flex items-center justify-between px-1.5 border-t border-white/10">
+									<div className="absolute inset-x-0 bottom-0 py-0.5 bg-black/80 backdrop-blur-sm flex items-center justify-between px-1 border-t border-white/10">
 										<button
 											disabled={idx === 0}
 											onClick={(e) => {
 												e.stopPropagation();
 												onMoveFile(idx, idx - 1);
 											}}
-											className="p-1 rounded hover:bg-white/20 text-white disabled:opacity-20 transition-colors"
+											className="p-0.5 rounded hover:bg-white/20 text-white disabled:opacity-20 transition-colors"
 											title="Move left"
 										>
 											<ArrowLeft className="h-3 w-3" />
@@ -420,7 +424,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 												e.stopPropagation();
 												onMoveFile(idx, idx + 1);
 											}}
-											className="p-1 rounded hover:bg-white/20 text-white disabled:opacity-20 transition-colors"
+											className="p-0.5 rounded hover:bg-white/20 text-white disabled:opacity-20 transition-colors"
 											title="Move right"
 										>
 											<ArrowRight className="h-3 w-3" />
@@ -432,7 +436,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 											e.stopPropagation();
 											onRemoveFile(idx);
 										}}
-										className="absolute top-1.5 right-1.5 p-1 rounded-full bg-black/70 hover:bg-rose-600 text-white shadow-lg backdrop-blur-sm transition-colors z-10"
+										className="absolute top-1 right-1 p-1 rounded-full bg-black/70 hover:bg-rose-600 text-white shadow-lg backdrop-blur-sm transition-colors z-10"
 										title="Delete"
 									>
 										<X className="h-3 w-3" />
@@ -446,7 +450,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 
 			{/* Настройки публикации */}
 			<div
-				className="mt-3 rounded-2xl border overflow-hidden select-none"
+				className="rounded-2xl border overflow-hidden select-none mb-2 flex-shrink-0"
 				style={{
 					backgroundColor: "var(--bg-surface-sub)",
 					borderColor: "var(--border-light)",
@@ -454,7 +458,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 			>
 				<button
 					onClick={onToggleSettings}
-					className="w-full flex items-center justify-between p-3 text-xs font-semibold hover:opacity-80 transition-opacity"
+					className="w-full flex items-center justify-between p-2.5 text-xs font-semibold hover:opacity-80 transition-opacity"
 					style={{ color: "var(--text-app)" }}
 				>
 					<span>{t.pubSettings}</span>
@@ -467,10 +471,10 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 
 				{isSettingsOpen && (
 					<div
-						className="p-3 pt-0 space-y-3.5 border-t"
+						className="p-2.5 pt-0 space-y-2 border-t"
 						style={{ borderColor: "var(--border-light)" }}
 					>
-						<div className="flex items-center justify-between pt-2">
+						<div className="flex items-center justify-between pt-1">
 							<div className="flex flex-col">
 								<span
 									className="text-xs font-medium"
@@ -494,7 +498,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 							>
 								<button
 									onClick={() => onSetViewMode("grid")}
-									className="flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold transition-all"
+									className="flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold transition-all"
 									style={{
 										backgroundColor:
 											attachmentsViewMode === "grid"
@@ -506,12 +510,12 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 												: "var(--text-muted)",
 									}}
 								>
-									<LayoutGrid className="h-3.5 w-3.5" />
+									<LayoutGrid className="h-3 w-3" />
 									<span>{t.grid}</span>
 								</button>
 								<button
 									onClick={() => onSetViewMode("carousel")}
-									className="flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold transition-all"
+									className="flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold transition-all"
 									style={{
 										backgroundColor:
 											attachmentsViewMode === "carousel"
@@ -523,7 +527,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 												: "var(--text-muted)",
 									}}
 								>
-									<SlidersHorizontal className="h-3.5 w-3.5" />
+									<SlidersHorizontal className="h-3 w-3" />
 									<span>{t.carousel}</span>
 								</button>
 							</div>
@@ -568,7 +572,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 									</span>
 									{item.sub && (
 										<span
-											className="text-[11px]"
+											className="text-[10px]"
 											style={{ color: "var(--text-dim)" }}
 										>
 											{item.sub}
@@ -585,7 +589,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 										className="sr-only peer"
 									/>
 									<div
-										className="w-9 h-5 rounded-full border transition-all relative flex items-center px-0.5"
+										className="w-8 h-4 rounded-full border transition-all relative flex items-center px-0.5"
 										style={{
 											backgroundColor: item.val
 												? "var(--btn-primary-bg)"
@@ -594,9 +598,9 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 										}}
 									>
 										<div
-											className={`h-3.5 w-3.5 rounded-full transition-transform ${
+											className={`h-3 w-3 rounded-full transition-transform ${
 												item.val
-													? "translate-x-4 shadow-sm"
+													? "translate-x-3.5 shadow-sm"
 													: ""
 											}`}
 											style={{
@@ -615,7 +619,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 
 			{!editingPostId && (
 				<div
-					className="mt-3 p-3.5 rounded-2xl border flex flex-col gap-3 text-xs select-none relative"
+					className="p-2.5 rounded-2xl border flex flex-col gap-2 text-xs select-none relative mb-2 flex-shrink-0"
 					ref={calendarRef}
 					style={{
 						backgroundColor: "var(--bg-surface-sub)",
@@ -645,7 +649,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 								className="sr-only peer"
 							/>
 							<div
-								className="w-9 h-5 rounded-full border transition-all relative flex items-center px-0.5"
+								className="w-8 h-4 rounded-full border transition-all relative flex items-center px-0.5"
 								style={{
 									backgroundColor: isManualTime
 										? "var(--btn-primary-bg)"
@@ -654,9 +658,9 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 								}}
 							>
 								<div
-									className={`h-3.5 w-3.5 rounded-full transition-transform ${
+									className={`h-3 w-3 rounded-full transition-transform ${
 										isManualTime
-											? "translate-x-4 shadow-sm"
+											? "translate-x-3.5 shadow-sm"
 											: ""
 									}`}
 									style={{
@@ -671,7 +675,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 
 					{isManualTime && (
 						<div
-							className="pt-2.5 border-t flex items-center justify-between gap-3"
+							className="pt-2 border-t flex items-center justify-between gap-3"
 							style={{ borderColor: "var(--border-light)" }}
 						>
 							<span
@@ -682,7 +686,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 							</span>
 							<button
 								onClick={onToggleCalendar}
-								className="flex items-center gap-2 border rounded-xl px-3 py-1.5 text-xs font-mono focus:outline-none transition-colors"
+								className="flex items-center gap-2 border rounded-xl px-2.5 py-1 text-xs font-mono focus:outline-none transition-colors"
 								style={{
 									backgroundColor: "var(--bg-surface)",
 									borderColor: "var(--border-light)",
@@ -818,7 +822,15 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 									>
 										{Array.from({ length: 24 }).map(
 											(_, i) => (
-												<option key={i} value={i}>
+												<option
+													key={i}
+													value={i}
+													style={{
+														backgroundColor:
+															"var(--bg-surface)",
+														color: "var(--text-app)",
+													}}
+												>
 													{i
 														.toString()
 														.padStart(2, "0")}
@@ -846,7 +858,15 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 											(_, i) => {
 												const m = i * 5;
 												return (
-													<option key={m} value={m}>
+													<option
+														key={m}
+														value={m}
+														style={{
+															backgroundColor:
+																"var(--bg-surface)",
+															color: "var(--text-app)",
+														}}
+													>
 														{m
 															.toString()
 															.padStart(2, "0")}
@@ -878,13 +898,13 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 
 			{/* Кнопка добавления / сохранения */}
 			<div
-				className="mt-4 pt-3 border-t flex items-center gap-3"
+				className="pt-2 border-t flex items-center gap-2.5 mt-auto flex-shrink-0"
 				style={{ borderColor: "var(--border-app)" }}
 			>
 				{editingPostId && (
 					<button
 						onClick={onCancelEditing}
-						className="px-4 py-3.5 rounded-xl border font-semibold text-sm hover:opacity-80 transition-opacity"
+						className="px-3.5 py-3 rounded-xl border font-semibold text-xs hover:opacity-80 transition-opacity"
 						style={{
 							backgroundColor: "var(--bg-surface-sub)",
 							borderColor: "var(--border-light)",
@@ -898,7 +918,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 				<button
 					onClick={onSavePost}
 					disabled={!selectedTargetId}
-					className="flex-1 flex items-center justify-center gap-2.5 rounded-xl py-3.5 text-sm font-bold shadow-lg transition-all active:scale-[0.99] disabled:opacity-50 disabled:pointer-events-none"
+					className="flex-1 flex items-center justify-center gap-2 rounded-xl py-3 text-xs sm:text-sm font-bold shadow-lg transition-all active:scale-[0.99] disabled:opacity-50 disabled:pointer-events-none"
 					style={{
 						backgroundColor: "var(--btn-primary-bg)",
 						color: "var(--btn-primary-text)",

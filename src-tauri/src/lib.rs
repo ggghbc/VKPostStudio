@@ -117,6 +117,7 @@ pub fn run() {
             commands::pattern::reschedule_post_custom,
             commands::post::get_queue,
             commands::post::get_post_history,
+            commands::post::get_all_posts,
             commands::post::sync_vk_delayed_posts,
             commands::post::revert_vk_post_to_local_same_time,
             commands::post::revert_vk_post_to_local_next_slot,

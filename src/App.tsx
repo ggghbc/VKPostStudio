@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Header } from "./components/Header";
@@ -12,6 +12,9 @@ import {
 	RescheduleModal,
 	LightboxModal,
 	SettingsModal,
+	AllPostsModal,
+	DeleteConfirmModal,
+	CleanDiskModal,
 } from "./components/Modals";
 import { api } from "./services/api";
 import {
@@ -23,6 +26,7 @@ import {
 	Theme,
 } from "./types";
 import { Lang, translations } from "./services/i18n";
+import { format } from "date-fns";
 
 export default function App() {
 	const [theme, setTheme] = useState<Theme>(
@@ -55,6 +59,7 @@ export default function App() {
 
 	const [queue, setQueue] = useState<PostItem[]>([]);
 	const [historyPosts, setHistoryPosts] = useState<PostItem[]>([]);
+	const [allPosts, setAllPosts] = useState<PostItem[]>([]);
 	const [activeQueueTab, setActiveQueueTab] = useState<
 		"local" | "vk" | "history"
 	>("local");
@@ -62,7 +67,7 @@ export default function App() {
 		"list",
 	);
 	const [expandedPostIds, setExpandedPostIds] = useState<number[]>([]);
-	const [nextSlotDisplay, setNextSlotDisplay] = useState<string>("14:00");
+	const [nextSlotDisplay, setNextSlotDisplay] = useState<string>("Расчет...");
 	const [isSyncingVk, setIsSyncingVk] = useState(false);
 	const [isRightPanelOpen, setIsRightPanelOpen] = useState(true);
 
@@ -103,8 +108,22 @@ export default function App() {
 		null,
 	);
 	const [showBatchModal, setShowBatchModal] = useState(false);
-	const [batchChunkSize, setBatchChunkSize] = useState<number>(1);
 	const [isBatchCreating, setIsBatchCreating] = useState(false);
+
+	// Сессионный режим подтверждения удаления
+	const [skipDeleteConfirmSession, setSkipDeleteConfirmSession] =
+		useState(false);
+	const [postToDelete, setPostToDelete] = useState<PostItem | null>(null);
+
+	// Окно очистки диска
+	const [showCleanDiskModal, setShowCleanDiskModal] = useState(false);
+	const [cleanedDiskCount, setCleanedDiskCount] = useState<number | null>(
+		null,
+	);
+	const [isCleaningDisk, setIsCleaningDisk] = useState(false);
+
+	// Окно "Все посты"
+	const [showAllPostsModal, setShowAllPostsModal] = useState(false);
 
 	const [commentsOnPost, setCommentsOnPost] = useState(true);
 	const [notifyFollowers, setNotifyFollowers] = useState(true);
@@ -144,7 +163,28 @@ export default function App() {
 		localStorage.setItem("vk_lang", newLang);
 	};
 
-	// Перетаскивание файлов: защита от дублей событий WebView2
+	// Очистка недействительных токенов
+	const handleCleanExpiredTokens = async () => {
+		if (
+			!confirm(
+				lang === "ru"
+					? "Проверить все токены и удалить просроченные?"
+					: "Check all tokens and delete expired ones?",
+			)
+		)
+			return;
+		try {
+			const deleted = await api.cleanExpiredTokens();
+			alert(
+				`${lang === "ru" ? "Удалено недействительных токенов:" : "Removed invalid tokens:"} ${deleted}`,
+			);
+			loadAccounts();
+		} catch (e) {
+			alert("Error: " + e);
+		}
+	};
+
+	// Перехват drag-and-drop
 	useEffect(() => {
 		let isCancelled = false;
 		let unDrop: (() => void) | undefined;
@@ -157,9 +197,7 @@ export default function App() {
 				setIsDraggingOver(false);
 
 				const now = Date.now();
-				if (now - lastDropTimeRef.current < 250) {
-					return;
-				}
+				if (now - lastDropTimeRef.current < 250) return;
 				lastDropTimeRef.current = now;
 
 				const rawPaths: string[] = event.payload?.paths || [];
@@ -193,7 +231,36 @@ export default function App() {
 		};
 	}, []);
 
-	// Добавление файлов с дедупликацией по пути
+	useEffect(() => {
+		let unProgress: (() => void) | undefined;
+		let unFinish: (() => void) | undefined;
+
+		listen<any>("transfer-progress", (event) => {
+			const { current, total } = event.payload || {};
+			setTransferProgress(`Перенос ${current} из ${total}...`);
+		}).then((f) => {
+			unProgress = f;
+		});
+
+		listen<any>("transfer-finished", (event) => {
+			setIsTransferring(false);
+			setTransferProgress(null);
+			if (selectedTargetId) {
+				syncVkQueue(selectedTargetId);
+			}
+			if (event.payload?.error) {
+				alert(event.payload.error);
+			}
+		}).then((f) => {
+			unFinish = f;
+		});
+
+		return () => {
+			unProgress?.();
+			unFinish?.();
+		};
+	}, [selectedTargetId]);
+
 	const appendFiles = async (rawPaths: string[]) => {
 		const existing = new Set(attachedFilesRef.current.map((f) => f.path));
 		const uniqueToProcess: string[] = [];
@@ -319,18 +386,29 @@ export default function App() {
 		}
 	};
 
+	const loadAllPosts = async () => {
+		try {
+			const all = await api.getAllPosts();
+			setAllPosts(all);
+		} catch (e) {
+			console.error(e);
+		}
+	};
+
 	const syncVkQueue = async (tId: number) => {
 		setIsSyncingVk(true);
 		try {
 			const res = await api.syncVkQueue(tId);
 			setQueue(res.posts);
 			loadHistory(tId);
+			loadAllPosts();
 		} catch (e) {
 			console.error(e);
 			try {
 				const q = await api.getQueue(tId);
 				setQueue(q);
 				loadHistory(tId);
+				loadAllPosts();
 			} catch {}
 		} finally {
 			setIsSyncingVk(false);
@@ -347,7 +425,6 @@ export default function App() {
 		}
 	}, [selectedTargetId]);
 
-	// Расчет следующего времени постинга
 	useEffect(() => {
 		if (!selectedTargetId) {
 			setNextSlotDisplay(translations[lang].selectTarget);
@@ -357,7 +434,7 @@ export default function App() {
 		api.getNextSlot(selectedTargetId, patId)
 			.then((iso) => {
 				const d = new Date(iso);
-				setNextSlotDisplay(format(d, "dd/MM/yyyy HH:mm"));
+				setNextSlotDisplay(format(d, "dd/MM/yy - HH:mm"));
 				if (!isManualTime) {
 					setSelectedDate(d);
 					setPickerHours(d.getHours());
@@ -366,7 +443,7 @@ export default function App() {
 			})
 			.catch(() => {
 				const fallbackDate = new Date(Date.now() + 2 * 3600 * 1000);
-				setNextSlotDisplay(format(fallbackDate, "dd/MM/yyyy HH:mm"));
+				setNextSlotDisplay(format(fallbackDate, "dd/MM/yy - HH:mm"));
 				if (!isManualTime) {
 					setSelectedDate(fallbackDate);
 					setPickerHours(fallbackDate.getHours());
@@ -406,6 +483,14 @@ export default function App() {
 		const patId = selectedPatternId || (patterns[0]?.id ?? 1);
 
 		if (editingPostId) {
+			const payloadAttachments = attachedFiles.map((f) => ({
+				id: f.id,
+				local_path: f.path || null,
+				file_name: f.name,
+				vk_attachment_string: f.vkAttachmentString || null,
+				thumb_data: f.previewUrl || null,
+			}));
+
 			await api.updatePost({
 				postId: editingPostId,
 				text: postText.trim(),
@@ -414,9 +499,7 @@ export default function App() {
 				muteNotifications: !notifyFollowers,
 				markAsAds: adFromCreator,
 				attachmentsViewMode,
-				filePaths: attachedFiles
-					.map((f) => f.path)
-					.filter((p) => p.length > 0),
+				attachments: payloadAttachments,
 			});
 			setEditingPostId(null);
 			setPostText("");
@@ -449,23 +532,52 @@ export default function App() {
 		syncVkQueue(selectedTargetId);
 	};
 
-	const handleCleanExpiredTokens = async () => {
-		if (
-			!confirm(
-				lang === "ru"
-					? "Проверить все токены и удалить просроченные?"
-					: "Check all tokens and delete expired ones?",
-			)
-		)
-			return;
+	const executeDeletePost = async (post: PostItem) => {
+		const pid = post.id;
+		setQueue((prev) => prev.filter((p) => p.id !== pid));
+		setHistoryPosts((prev) => prev.filter((p) => p.id !== pid));
+		setAllPosts((prev) => prev.filter((p) => p.id !== pid));
+
+		if (post.status === "transferred_to_vk") {
+			await api.deleteVkPost(pid).catch(console.error);
+		} else if (post.status === "archived") {
+			await api.deleteHistoryPost(pid).catch(console.error);
+		} else {
+			await api.deleteLocalPost(pid).catch(console.error);
+		}
+
+		if (selectedTargetId) syncVkQueue(selectedTargetId);
+	};
+
+	const handleDeleteRequest = (post: PostItem) => {
+		if (skipDeleteConfirmSession) {
+			executeDeletePost(post);
+		} else {
+			setPostToDelete(post);
+		}
+	};
+
+	const handleConfirmDeleteDialog = (dontAskAgain: boolean) => {
+		if (dontAskAgain) {
+			setSkipDeleteConfirmSession(true);
+		}
+		if (postToDelete) {
+			executeDeletePost(postToDelete);
+			setPostToDelete(null);
+		}
+	};
+
+	const handleExecuteCleanDisk = async () => {
+		if (!selectedTargetId) return;
+		setIsCleaningDisk(true);
 		try {
-			const deleted = await api.cleanExpiredTokens();
-			alert(
-				`${lang === "ru" ? "Удалено недействительных токенов:" : "Removed invalid tokens:"} ${deleted}`,
-			);
-			loadAccounts();
+			const count = await api.cleanLocalFiles(selectedTargetId);
+			setCleanedDiskCount(count);
+			syncVkQueue(selectedTargetId);
 		} catch (e) {
 			alert("Error: " + e);
+		} finally {
+			setIsCleaningDisk(false);
 		}
 	};
 
@@ -540,6 +652,10 @@ export default function App() {
 					localStorage.setItem("vk_selected_target", id.toString());
 				}}
 				onOpenSettings={() => setShowSettingsModal(true)}
+				onOpenAllPostsModal={() => {
+					loadAllPosts();
+					setShowAllPostsModal(true);
+				}}
 				onToggleRightPanel={() =>
 					setIsRightPanelOpen(!isRightPanelOpen)
 				}
@@ -626,22 +742,9 @@ export default function App() {
 					onSetTab={setActiveQueueTab}
 					onSetViewMode={setQueueViewMode}
 					onSetContentMonth={setContentCalendarMonth}
-					onCleanLocalFiles={async () => {
-						if (
-							!selectedTargetId ||
-							!confirm(
-								lang === "ru"
-									? "Удалить с диска оригиналы картинок, которые уже в ВК?"
-									: "Delete uploaded image files from disk?",
-							)
-						)
-							return;
-						const count =
-							await api.cleanLocalFiles(selectedTargetId);
-						alert(
-							`${lang === "ru" ? "Очищено файлов:" : "Files cleaned:"} ${count}`,
-						);
-						syncVkQueue(selectedTargetId);
+					onCleanLocalFiles={() => {
+						setCleanedDiskCount(null);
+						setShowCleanDiskModal(true);
 					}}
 					onSyncVk={() =>
 						selectedTargetId && syncVkQueue(selectedTargetId)
@@ -654,10 +757,13 @@ export default function App() {
 								? "Отправка в VK..."
 								: "Sending to VK...",
 						);
-						await api.startTransfer(selectedTargetId).catch((e) => {
+						try {
+							await api.startTransfer(selectedTargetId);
+						} catch (e) {
 							alert(e);
 							setIsTransferring(false);
-						});
+							setTransferProgress(null);
+						}
 					}}
 					onToggleExpand={(id) =>
 						setExpandedPostIds((prev) =>
@@ -680,10 +786,12 @@ export default function App() {
 						);
 						setAttachedFiles(
 							post.attachments.map((a) => ({
+								id: a.id,
 								path: a.local_path || "",
 								name: a.file_name,
 								isImage: true,
 								previewUrl: a.thumb_data,
+								vkAttachmentString: a.vk_attachment_string,
 							})),
 						);
 						setIsRightPanelOpen(true);
@@ -703,37 +811,34 @@ export default function App() {
 						setRescheduleMinutes(d.getMinutes());
 						setRescheduleViewMonth(d);
 					}}
-					onDeleteLocalPost={async (id) => {
-						await api.deleteLocalPost(id);
-						if (selectedTargetId) syncVkQueue(selectedTargetId);
-					}}
-					onDeleteVkPost={async (id) => {
-						if (
-							!confirm(
-								lang === "ru"
-									? "Удалить отложенный пост со стены ВК?"
-									: "Delete postponed post from VK wall?",
-							)
-						)
-							return;
-						await api.deleteVkPost(id);
-						if (selectedTargetId) syncVkQueue(selectedTargetId);
-					}}
-					onDeleteHistoryPost={async (id) => {
-						if (
-							!confirm(
-								lang === "ru"
-									? "Удалить запись из истории?"
-									: "Delete record from history?",
-							)
-						)
-							return;
-						await api.deleteHistoryPost(id);
-						if (selectedTargetId) loadHistory(selectedTargetId);
-					}}
+					onDeletePost={handleDeleteRequest}
 					onOpenFullImage={setFullViewImage}
 				/>
 			</main>
+
+			<DeleteConfirmModal
+				show={postToDelete !== null}
+				lang={lang}
+				onClose={() => setPostToDelete(null)}
+				onConfirm={handleConfirmDeleteDialog}
+			/>
+
+			<CleanDiskModal
+				show={showCleanDiskModal}
+				lang={lang}
+				cleanedCount={cleanedDiskCount}
+				isCleaning={isCleaningDisk}
+				onClose={() => setShowCleanDiskModal(false)}
+				onConfirmClean={handleExecuteCleanDisk}
+			/>
+
+			<AllPostsModal
+				show={showAllPostsModal}
+				lang={lang}
+				posts={allPosts}
+				onClose={() => setShowAllPostsModal(false)}
+				onDeletePost={handleDeleteRequest}
+			/>
 
 			<SettingsModal
 				show={showSettingsModal}
@@ -832,23 +937,22 @@ export default function App() {
 
 			<BatchModal
 				show={showBatchModal}
-				totalFiles={attachedFiles.length}
-				chunkSize={batchChunkSize}
-				isCreating={isBatchCreating}
 				lang={lang}
+				targets={targets}
+				selectedTargetId={selectedTargetId}
+				patterns={patterns}
+				selectedPatternId={selectedPatternId}
+				isCreating={isBatchCreating}
 				onClose={() => setShowBatchModal(false)}
-				onSetChunkSize={setBatchChunkSize}
-				onSubmit={async () => {
-					if (!selectedTargetId) return;
-					const patId = selectedPatternId || (patterns[0]?.id ?? 1);
+				onSubmit={async (params) => {
 					setIsBatchCreating(true);
 					try {
 						const count = await api.batchCreate({
-							targetId: selectedTargetId,
-							patternId: patId,
-							filePaths: attachedFiles.map((f) => f.path),
-							itemsPerPost: batchChunkSize,
-							text: postText.trim(),
+							targetId: params.targetId,
+							patternId: params.patternId,
+							filePaths: params.filePaths,
+							itemsPerPost: params.chunkSize,
+							text: params.text.trim(),
 							signed: authorsName,
 							closeComments: !commentsOnPost,
 							muteNotifications: !notifyFollowers,
@@ -856,12 +960,12 @@ export default function App() {
 							attachmentsViewMode,
 						});
 						setShowBatchModal(false);
-						setPostText("");
-						setAttachedFiles([]);
-						syncVkQueue(selectedTargetId);
+						if (selectedTargetId) syncVkQueue(selectedTargetId);
 						alert(
-							`${lang === "ru" ? "Создано постов:" : "Posts created:"} ${count}`,
+							`${lang === "ru" ? "Создано постов в очередь:" : "Posts generated into queue:"} ${count}`,
 						);
+					} catch (e) {
+						alert("Error: " + e);
 					} finally {
 						setIsBatchCreating(false);
 					}
@@ -892,7 +996,7 @@ export default function App() {
 				date={rescheduleDate}
 				hours={rescheduleHours}
 				minutes={rescheduleMinutes}
-				viewMonth={viewMonth}
+				viewMonth={rescheduleViewMonth}
 				lang={lang}
 				onClose={() => setRescheduleModalPost(null)}
 				onViewMonthChange={setRescheduleViewMonth}

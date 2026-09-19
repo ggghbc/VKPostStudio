@@ -6,6 +6,7 @@ import {
 	PanelRightClose,
 	PanelRightOpen,
 	Settings,
+	Database,
 } from "lucide-react";
 import { Account, Target } from "../types";
 import { translations, Lang } from "../services/i18n";
@@ -22,6 +23,7 @@ interface HeaderProps {
 	onOpenTokenModal: () => void;
 	onSelectTarget: (id: number) => void;
 	onOpenSettings: () => void;
+	onOpenAllPostsModal: () => void;
 	onToggleRightPanel: () => void;
 }
 
@@ -37,6 +39,7 @@ export const Header: React.FC<HeaderProps> = ({
 	onOpenTokenModal,
 	onSelectTarget,
 	onOpenSettings,
+	onOpenAllPostsModal,
 	onToggleRightPanel,
 }) => {
 	const t = translations[lang];
@@ -98,8 +101,8 @@ export const Header: React.FC<HeaderProps> = ({
 
 							<button
 								onClick={onDeleteAccount}
-								className="p-1.5 rounded-lg hover:text-rose-400 transition-colors"
-								style={{ color: "var(--text-muted)" }}
+								className="p-1.5 rounded-lg hover:opacity-75 transition-colors"
+								style={{ color: "var(--text-dim)" }}
 								title={
 									lang === "ru"
 										? "Удалить этот токен"
@@ -110,14 +113,17 @@ export const Header: React.FC<HeaderProps> = ({
 							</button>
 						</div>
 					) : (
-						<span className="text-xs font-medium text-amber-400">
+						<span
+							className="text-xs font-medium"
+							style={{ color: "var(--accent)" }}
+						>
 							{t.noTokens}
 						</span>
 					)}
 
 					<button
 						onClick={onOpenTokenModal}
-						className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors"
+						className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors hover:opacity-80"
 						style={{
 							backgroundColor: "var(--bg-surface-sub)",
 							color: "var(--text-app)",
@@ -162,6 +168,24 @@ export const Header: React.FC<HeaderProps> = ({
 					</div>
 				)}
 
+				{/* Кнопка открытия всех постов базы данных */}
+				<button
+					onClick={onOpenAllPostsModal}
+					className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-semibold hover:opacity-80 transition-all"
+					style={{
+						backgroundColor: "var(--bg-surface-sub)",
+						borderColor: "var(--border-light)",
+						color: "var(--text-app)",
+					}}
+					title={t.allPostsTab}
+				>
+					<Database
+						className="h-3.5 w-3.5"
+						style={{ color: "var(--accent)" }}
+					/>
+					<span className="hidden md:inline">{t.allPostsTab}</span>
+				</button>
+
 				<button
 					onClick={onOpenSettings}
 					className="p-1.5 rounded-lg border transition-colors hover:opacity-80"
@@ -177,7 +201,7 @@ export const Header: React.FC<HeaderProps> = ({
 
 				<button
 					onClick={onToggleRightPanel}
-					className="p-1.5 rounded-lg border transition-colors"
+					className="p-1.5 rounded-lg border transition-colors hover:opacity-80"
 					style={{
 						backgroundColor: "var(--bg-surface-sub)",
 						borderColor: "var(--border-light)",

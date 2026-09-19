@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import {
 	format,
 	subMonths,
@@ -27,8 +27,13 @@ import {
 	Palette,
 	Globe,
 	HardDrive,
+	UploadCloud,
+	Database,
+	AlertCircle,
+	Check,
 } from "lucide-react";
-import { PostItem, Theme, Pattern } from "../types";
+import { open } from "@tauri-apps/plugin-dialog";
+import { PostItem, Theme, Pattern, Target } from "../types";
 import { translations, Lang } from "../services/i18n";
 
 export const SettingsModal: React.FC<{
@@ -175,7 +180,7 @@ export const SettingsModal: React.FC<{
 							<button
 								key={lg.id}
 								onClick={() => onSetLang(lg.id)}
-								className="py-2 px-3 rounded-xl border text-xs font-medium transition-all"
+								className="py-2 px-3 rounded-xl border text-xs font-semibold transition-all"
 								style={{
 									backgroundColor:
 										lang === lg.id
@@ -241,6 +246,416 @@ export const SettingsModal: React.FC<{
 					>
 						OK
 					</button>
+				</div>
+			</div>
+		</div>
+	);
+};
+
+// Модальное окно подтверждения удаления с галочкой "Не спрашивать в текущей сессии"
+export const DeleteConfirmModal: React.FC<{
+	show: boolean;
+	lang: Lang;
+	onClose: () => void;
+	onConfirm: (dontAskAgain: boolean) => void;
+}> = ({ show, lang, onClose, onConfirm }) => {
+	const [dontAskAgain, setDontAskAgain] = useState(false);
+	if (!show) return null;
+	const t = translations[lang];
+
+	return (
+		<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-150">
+			<div
+				className="border rounded-2xl w-full max-w-sm p-5 shadow-2xl space-y-4"
+				style={{
+					backgroundColor: "var(--bg-surface)",
+					borderColor: "var(--border-app)",
+				}}
+			>
+				<div className="flex items-center gap-2 text-rose-400">
+					<AlertCircle className="h-5 w-5" />
+					<h3
+						className="font-semibold text-sm"
+						style={{ color: "var(--text-app)" }}
+					>
+						{t.deleteConfirmTitle}
+					</h3>
+				</div>
+
+				<p
+					className="text-xs leading-relaxed"
+					style={{ color: "var(--text-muted)" }}
+				>
+					{t.deleteConfirmText}
+				</p>
+
+				<label
+					className="flex items-center gap-2 text-xs cursor-pointer select-none"
+					style={{ color: "var(--text-app)" }}
+				>
+					<input
+						type="checkbox"
+						checked={dontAskAgain}
+						onChange={(e) => setDontAskAgain(e.target.checked)}
+						className="rounded cursor-pointer"
+					/>
+					<span>{t.dontAskSession}</span>
+				</label>
+
+				<div
+					className="flex justify-end gap-2 pt-2 border-t"
+					style={{ borderColor: "var(--border-app)" }}
+				>
+					<button
+						onClick={onClose}
+						className="px-4 py-2 rounded-xl text-xs font-medium hover:opacity-70"
+					>
+						{t.cancel}
+					</button>
+					<button
+						onClick={() => onConfirm(dontAskAgain)}
+						className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold shadow-md transition-all active:scale-95"
+					>
+						{t.confirmDelete}
+					</button>
+				</div>
+			</div>
+		</div>
+	);
+};
+
+// Информативное модальное окно очистки файлов с диска
+export const CleanDiskModal: React.FC<{
+	show: boolean;
+	lang: Lang;
+	cleanedCount: number | null;
+	isCleaning: boolean;
+	onClose: () => void;
+	onConfirmClean: () => void;
+}> = ({ show, lang, cleanedCount, isCleaning, onClose, onConfirmClean }) => {
+	if (!show) return null;
+	const t = translations[lang];
+
+	return (
+		<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-150">
+			<div
+				className="border rounded-2xl w-full max-w-md p-6 shadow-2xl space-y-4"
+				style={{
+					backgroundColor: "var(--bg-surface)",
+					borderColor: "var(--border-app)",
+				}}
+			>
+				<div
+					className="flex items-center justify-between pb-2 border-b"
+					style={{ borderColor: "var(--border-app)" }}
+				>
+					<div className="flex items-center gap-2 text-emerald-400">
+						<HardDrive className="h-5 w-5" />
+						<h3
+							className="font-semibold text-sm"
+							style={{ color: "var(--text-app)" }}
+						>
+							{t.cleanDiskFiles}
+						</h3>
+					</div>
+					<button onClick={onClose} className="hover:opacity-70">
+						<X className="h-5 w-5" />
+					</button>
+				</div>
+
+				{cleanedCount !== null ? (
+					<div className="space-y-4 py-2 text-center">
+						<div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-400 flex items-center justify-center gap-2">
+							<Check className="h-4 w-4" />
+							<span>
+								{t.cleanSuccess} <strong>{cleanedCount}</strong>
+							</span>
+						</div>
+						<div className="flex justify-center">
+							<button
+								onClick={onClose}
+								className="px-5 py-2 font-bold rounded-xl text-xs shadow-md transition-all active:scale-95"
+								style={{
+									backgroundColor: "var(--btn-primary-bg)",
+									color: "var(--btn-primary-text)",
+								}}
+							>
+								OK
+							</button>
+						</div>
+					</div>
+				) : (
+					<div className="space-y-4">
+						<p
+							className="text-xs leading-relaxed"
+							style={{ color: "var(--text-muted)" }}
+						>
+							{t.cleanExplain}
+						</p>
+						<div
+							className="flex justify-end gap-2.5 pt-2 border-t"
+							style={{ borderColor: "var(--border-app)" }}
+						>
+							<button
+								onClick={onClose}
+								className="px-4 py-2 rounded-xl text-xs font-medium hover:opacity-70"
+							>
+								{t.cancel}
+							</button>
+							<button
+								onClick={onConfirmClean}
+								disabled={isCleaning}
+								className="px-4 py-2 font-bold rounded-xl text-xs shadow-md transition-all active:scale-95 disabled:opacity-50"
+								style={{
+									backgroundColor: "var(--btn-primary-bg)",
+									color: "var(--btn-primary-text)",
+								}}
+							>
+								{isCleaning ? "..." : t.cleanDiskFiles}
+							</button>
+						</div>
+					</div>
+				)}
+			</div>
+		</div>
+	);
+};
+
+// Отдельное просторное окно для всех постов приложения
+export const AllPostsModal: React.FC<{
+	show: boolean;
+	lang: Lang;
+	posts: PostItem[];
+	onClose: () => void;
+	onDeletePost: (post: PostItem) => void;
+}> = ({ show, lang, posts, onClose, onDeletePost }) => {
+	if (!show) return null;
+	const t = translations[lang];
+
+	const [sortCriteria, setSortCriteria] = useState<
+		"id_desc" | "id_asc" | "date_asc" | "date_desc" | "status"
+	>("id_desc");
+	const [groupByCriteria, setGroupByCriteria] = useState<
+		"none" | "target" | "status"
+	>("none");
+
+	const sortedPosts = [...posts].sort((a, b) => {
+		if (sortCriteria === "id_desc") return b.id - a.id;
+		if (sortCriteria === "id_asc") return a.id - b.id;
+		if (sortCriteria === "date_asc")
+			return (
+				new Date(a.scheduled_at_utc).getTime() -
+				new Date(b.scheduled_at_utc).getTime()
+			);
+		if (sortCriteria === "date_desc")
+			return (
+				new Date(b.scheduled_at_utc).getTime() -
+				new Date(a.scheduled_at_utc).getTime()
+			);
+		if (sortCriteria === "status") return a.status.localeCompare(b.status);
+		return 0;
+	});
+
+	const renderCard = (post: PostItem) => (
+		<div
+			key={post.id}
+			className="p-3 rounded-xl border flex items-center justify-between gap-3 text-xs"
+			style={{
+				backgroundColor: "var(--bg-surface-sub)",
+				borderColor: "var(--border-light)",
+			}}
+		>
+			<div className="flex items-center gap-2.5 flex-1 min-w-0 flex-wrap">
+				<span className="font-mono font-bold text-[11px] opacity-60">
+					#{post.id}
+				</span>
+				{post.target_title && (
+					<span
+						className="text-[10px] px-2 py-0.5 rounded-md font-semibold border truncate max-w-[170px]"
+						style={{
+							backgroundColor: "var(--bg-surface)",
+							borderColor: "var(--border-light)",
+							color: "var(--text-app)",
+						}}
+					>
+						{post.target_title}
+					</span>
+				)}
+				<span
+					className="font-mono font-semibold"
+					style={{ color: "var(--accent)" }}
+				>
+					{format(
+						new Date(post.scheduled_at_utc),
+						"dd/MM/yyyy HH:mm",
+					)}
+				</span>
+				<span
+					className="text-[10px] px-2 py-0.5 rounded border"
+					style={{ borderColor: "var(--border-light)" }}
+				>
+					{post.status === "queued"
+						? t.statusLocal
+						: post.status === "transferred_to_vk"
+							? t.statusVk
+							: post.status === "archived"
+								? t.statusPublished
+								: t.statusError}
+				</span>
+				<span
+					className="text-xs truncate max-w-xs opacity-80"
+					style={{ color: "var(--text-app)" }}
+				>
+					{post.text || (
+						<em className="opacity-50">
+							{lang === "ru" ? "Без текста" : "No text"}
+						</em>
+					)}
+				</span>
+			</div>
+
+			<button
+				onClick={() => onDeletePost(post)}
+				className="p-1.5 hover:text-rose-400 transition-colors"
+				style={{ color: "var(--text-dim)" }}
+				title="Delete"
+			>
+				<Trash2 className="h-4 w-4" />
+			</button>
+		</div>
+	);
+
+	return (
+		<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-150">
+			<div
+				className="border rounded-2xl w-full max-w-3xl p-6 shadow-2xl space-y-4 max-h-[90vh] flex flex-col"
+				style={{
+					backgroundColor: "var(--bg-surface)",
+					borderColor: "var(--border-app)",
+				}}
+			>
+				<div
+					className="flex items-center justify-between pb-3 border-b flex-shrink-0"
+					style={{ borderColor: "var(--border-app)" }}
+				>
+					<div className="flex items-center gap-2">
+						<Database
+							className="h-5 w-5"
+							style={{ color: "var(--accent)" }}
+						/>
+						<h3
+							className="font-semibold text-base"
+							style={{ color: "var(--text-app)" }}
+						>
+							{t.allPostsTab} ({posts.length})
+						</h3>
+					</div>
+					<button onClick={onClose} className="hover:opacity-70">
+						<X className="h-5 w-5" />
+					</button>
+				</div>
+
+				{/* Панель сортировки и фильтрации */}
+				<div
+					className="flex items-center justify-between gap-3 text-xs flex-wrap flex-shrink-0 p-2 rounded-xl border"
+					style={{
+						backgroundColor: "var(--bg-surface-sub)",
+						borderColor: "var(--border-light)",
+					}}
+				>
+					<div className="flex items-center gap-1.5">
+						<span style={{ color: "var(--text-dim)" }}>
+							{t.sortBy}
+						</span>
+						<select
+							value={sortCriteria}
+							onChange={(e) =>
+								setSortCriteria(e.target.value as any)
+							}
+							className="border rounded-lg px-2 py-1 text-xs focus:outline-none cursor-pointer"
+							style={{
+								backgroundColor: "var(--bg-surface)",
+								color: "var(--text-app)",
+								borderColor: "var(--border-light)",
+							}}
+						>
+							<option value="id_desc">{t.sortIdDesc}</option>
+							<option value="id_asc">{t.sortIdAsc}</option>
+							<option value="date_asc">{t.sortDateAsc}</option>
+							<option value="date_desc">{t.sortDateDesc}</option>
+							<option value="status">{t.sortStatus}</option>
+						</select>
+					</div>
+
+					<div className="flex items-center gap-1.5">
+						<span style={{ color: "var(--text-dim)" }}>
+							{t.groupBy}
+						</span>
+						<select
+							value={groupByCriteria}
+							onChange={(e) =>
+								setGroupByCriteria(e.target.value as any)
+							}
+							className="border rounded-lg px-2 py-1 text-xs focus:outline-none cursor-pointer"
+							style={{
+								backgroundColor: "var(--bg-surface)",
+								color: "var(--text-app)",
+								borderColor: "var(--border-light)",
+							}}
+						>
+							<option value="none">{t.groupNone}</option>
+							<option value="target">{t.groupByTarget}</option>
+							<option value="status">{t.groupByStatus}</option>
+						</select>
+					</div>
+				</div>
+
+				{/* Список постов с группировкой */}
+				<div className="flex-1 overflow-y-auto space-y-2.5 pr-1">
+					{sortedPosts.length === 0 ? (
+						<div className="text-center py-12 text-xs opacity-50">
+							{t.emptyAllPosts}
+						</div>
+					) : groupByCriteria === "none" ? (
+						sortedPosts.map(renderCard)
+					) : (
+						Object.entries(
+							sortedPosts.reduce(
+								(acc, p) => {
+									const groupKey =
+										groupByCriteria === "target"
+											? p.target_title || "Без цели"
+											: p.status === "queued"
+												? t.statusLocal
+												: p.status ===
+													  "transferred_to_vk"
+													? t.statusVk
+													: p.status === "archived"
+														? t.statusPublished
+														: t.statusError;
+									if (!acc[groupKey]) acc[groupKey] = [];
+									acc[groupKey].push(p);
+									return acc;
+								},
+								{} as Record<string, PostItem[]>,
+							),
+						).map(([groupTitle, groupedPosts]) => (
+							<div key={groupTitle} className="space-y-1.5">
+								<div
+									className="text-xs font-bold px-2 py-1 rounded border sticky top-0"
+									style={{
+										backgroundColor:
+											"var(--bg-surface-sub)",
+										borderColor: "var(--border-light)",
+										color: "var(--accent)",
+									}}
+								>
+									{groupTitle} ({groupedPosts.length})
+								</div>
+								{groupedPosts.map(renderCard)}
+							</div>
+						))
+					)}
 				</div>
 			</div>
 		</div>
@@ -633,102 +1048,287 @@ export const PatternModal: React.FC<{
 
 export const BatchModal: React.FC<{
 	show: boolean;
-	totalFiles: number;
-	chunkSize: number;
-	isCreating: boolean;
 	lang: Lang;
+	targets: Target[];
+	selectedTargetId: number | null;
+	patterns: Pattern[];
+	selectedPatternId: number | null;
+	isCreating: boolean;
 	onClose: () => void;
-	onSetChunkSize: (s: number) => void;
-	onSubmit: () => void;
+	onSubmit: (params: {
+		targetId: number;
+		patternId: number;
+		filePaths: string[];
+		chunkSize: number;
+		text: string;
+	}) => void;
 }> = ({
 	show,
-	totalFiles,
-	chunkSize,
-	isCreating,
 	lang,
+	targets,
+	selectedTargetId,
+	patterns,
+	selectedPatternId,
+	isCreating,
 	onClose,
-	onSetChunkSize,
 	onSubmit,
 }) => {
 	if (!show) return null;
 	const t = translations[lang];
 
+	const [batchPaths, setBatchPaths] = useState<string[]>([]);
+	const [chunkSize, setChunkSize] = useState<number>(1);
+	const [batchText, setBatchText] = useState("");
+	const [targetId, setTargetId] = useState<number>(
+		selectedTargetId || targets[0]?.id || 0,
+	);
+	const [patternId, setPatternId] = useState<number>(
+		selectedPatternId || patterns[0]?.id || 0,
+	);
+
+	const handlePickBatchFiles = async () => {
+		const res = await open({
+			multiple: true,
+			filters: [
+				{
+					name: "Изображения",
+					extensions: ["jpg", "jpeg", "png", "webp", "gif", "bmp"],
+				},
+			],
+		});
+		if (res) {
+			const paths = Array.isArray(res) ? res : [res];
+			setBatchPaths((prev) => Array.from(new Set([...prev, ...paths])));
+		}
+	};
+
+	const handleCreate = () => {
+		if (batchPaths.length === 0)
+			return alert(
+				lang === "ru" ? "Выберите изображения" : "Select images",
+			);
+		if (!targetId || !patternId)
+			return alert(
+				lang === "ru"
+					? "Выберите цель и расписание"
+					: "Select target & pattern",
+			);
+		onSubmit({
+			targetId,
+			patternId,
+			filePaths: batchPaths,
+			chunkSize,
+			text: batchText,
+		});
+	};
+
 	return (
 		<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-150">
 			<div
-				className="border rounded-2xl w-full max-w-md p-6 shadow-2xl"
+				className="border rounded-2xl w-full max-w-lg p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto"
 				style={{
 					backgroundColor: "var(--bg-surface)",
 					borderColor: "var(--border-app)",
 				}}
 			>
-				<div className="flex items-center justify-between mb-4">
+				<div
+					className="flex items-center justify-between pb-2 border-b"
+					style={{ borderColor: "var(--border-app)" }}
+				>
 					<div
 						className="flex items-center gap-2"
 						style={{ color: "var(--accent)" }}
 					>
 						<Layers3 className="h-5 w-5" />
 						<h3
-							className="font-semibold text-sm"
+							className="font-semibold text-base"
 							style={{ color: "var(--text-app)" }}
 						>
-							{t.batchGen}
+							{t.batchTitle}
 						</h3>
 					</div>
 					<button onClick={onClose} className="hover:opacity-70">
 						<X className="h-5 w-5" />
 					</button>
 				</div>
-				<p
-					className="text-xs mb-4 leading-relaxed"
-					style={{ color: "var(--text-muted)" }}
+
+				<div
+					onClick={handlePickBatchFiles}
+					className="border-2 border-dashed rounded-2xl p-6 text-center cursor-pointer hover:opacity-85 transition-all flex flex-col items-center justify-center"
+					style={{
+						backgroundColor: "var(--bg-surface-sub)",
+						borderColor: "var(--border-light)",
+					}}
 				>
-					{lang === "ru"
-						? `Вы выбрали ${totalFiles} изображений. Выберите схему:`
-						: `You selected ${totalFiles} images. Choose chunk size:`}
-				</p>
-				<div className="space-y-2 mb-5">
-					{[
-						{
-							size: 1,
-							label: `По 1 фото на пост (${totalFiles} постов)`,
-						},
-						{
-							size: 2,
-							label: `По 2 фото на пост (${Math.ceil(totalFiles / 2)} постов)`,
-						},
-						{
-							size: 4,
-							label: `По 4 фото на пост (${Math.ceil(totalFiles / 4)} постов)`,
-						},
-					].map((opt) => (
+					<UploadCloud
+						className="h-8 w-8 mb-2"
+						style={{ color: "var(--accent)" }}
+					/>
+					<span
+						className="text-xs font-semibold"
+						style={{ color: "var(--text-app)" }}
+					>
+						{t.batchDropzone}
+					</span>
+					<span
+						className="text-[11px] mt-0.5"
+						style={{ color: "var(--text-dim)" }}
+					>
+						{t.batchDropzoneSub}
+					</span>
+				</div>
+
+				{batchPaths.length > 0 && (
+					<div className="flex items-center justify-between text-xs px-1">
+						<span style={{ color: "var(--text-app)" }}>
+							{t.batchFilesSelected}{" "}
+							<strong>{batchPaths.length}</strong>
+						</span>
 						<button
-							key={opt.size}
-							onClick={() => onSetChunkSize(opt.size)}
-							className="w-full flex items-center justify-between p-3 rounded-xl border text-xs font-semibold transition-all"
+							onClick={() => setBatchPaths([])}
+							className="text-[11px] hover:underline"
+							style={{ color: "var(--accent)" }}
+						>
+							{lang === "ru" ? "Очистить список" : "Clear list"}
+						</button>
+					</div>
+				)}
+
+				<div>
+					<label
+						className="block text-xs font-medium mb-1"
+						style={{ color: "var(--text-dim)" }}
+					>
+						{t.batchTextLabel}
+					</label>
+					<textarea
+						rows={2}
+						value={batchText}
+						onChange={(e) => setBatchText(e.target.value)}
+						className="w-full rounded-xl p-2.5 text-xs border focus:outline-none resize-none"
+						style={{
+							backgroundColor: "var(--bg-surface-sub)",
+							color: "var(--text-app)",
+							borderColor: "var(--border-light)",
+						}}
+						placeholder={
+							lang === "ru"
+								? "Текст для каждого поста..."
+								: "Text for each post..."
+						}
+					/>
+				</div>
+
+				<div>
+					<label
+						className="block text-xs font-medium mb-1.5"
+						style={{ color: "var(--text-dim)" }}
+					>
+						{t.batchScheme}
+					</label>
+					<div className="grid grid-cols-3 gap-2">
+						{[1, 2, 4].map((num) => (
+							<button
+								key={num}
+								onClick={() => setChunkSize(num)}
+								className="py-2 px-3 rounded-xl border text-xs font-semibold transition-all flex items-center justify-center gap-1.5"
+								style={{
+									backgroundColor:
+										chunkSize === num
+											? "var(--btn-primary-bg)"
+											: "var(--bg-surface-sub)",
+									borderColor:
+										chunkSize === num
+											? "var(--btn-primary-bg)"
+											: "var(--border-light)",
+									color:
+										chunkSize === num
+											? "var(--btn-primary-text)"
+											: "var(--text-app)",
+								}}
+							>
+								<span>
+									{num}{" "}
+									{lang === "ru" ? "фото/пост" : "img/post"}
+								</span>
+								{chunkSize === num && (
+									<CheckCircle2 className="h-3.5 w-3.5" />
+								)}
+							</button>
+						))}
+					</div>
+					{batchPaths.length > 0 && (
+						<span
+							className="block text-[11px] mt-1.5 font-mono text-center"
+							style={{ color: "var(--text-dim)" }}
+						>
+							{lang === "ru"
+								? `Будет создано ${Math.ceil(batchPaths.length / chunkSize)} постов`
+								: `Will create ${Math.ceil(batchPaths.length / chunkSize)} posts`}
+						</span>
+					)}
+				</div>
+
+				<div
+					className="grid grid-cols-2 gap-3 pt-2 border-t"
+					style={{ borderColor: "var(--border-app)" }}
+				>
+					<div>
+						<label
+							className="block text-xs font-medium mb-1"
+							style={{ color: "var(--text-dim)" }}
+						>
+							{t.targetLabel}
+						</label>
+						<select
+							value={targetId}
+							onChange={(e) =>
+								setTargetId(Number(e.target.value))
+							}
+							className="w-full border rounded-xl p-2 text-xs focus:outline-none cursor-pointer truncate"
 							style={{
-								backgroundColor:
-									chunkSize === opt.size
-										? "var(--btn-primary-bg)"
-										: "var(--bg-surface-sub)",
-								borderColor:
-									chunkSize === opt.size
-										? "var(--btn-primary-bg)"
-										: "var(--border-light)",
-								color:
-									chunkSize === opt.size
-										? "var(--btn-primary-text)"
-										: "var(--text-app)",
+								backgroundColor: "var(--bg-surface-sub)",
+								color: "var(--text-app)",
+								borderColor: "var(--border-light)",
 							}}
 						>
-							<span>{opt.label}</span>
-							{chunkSize === opt.size && (
-								<CheckCircle2 className="h-4 w-4" />
-							)}
-						</button>
-					))}
+							{targets.map((tgt) => (
+								<option key={tgt.id} value={tgt.id}>
+									{tgt.title}
+								</option>
+							))}
+						</select>
+					</div>
+
+					<div>
+						<label
+							className="block text-xs font-medium mb-1"
+							style={{ color: "var(--text-dim)" }}
+						>
+							{lang === "ru" ? "Расписание:" : "Pattern:"}
+						</label>
+						<select
+							value={patternId}
+							onChange={(e) =>
+								setPatternId(Number(e.target.value))
+							}
+							className="w-full border rounded-xl p-2 text-xs focus:outline-none cursor-pointer truncate"
+							style={{
+								backgroundColor: "var(--bg-surface-sub)",
+								color: "var(--text-app)",
+								borderColor: "var(--border-light)",
+							}}
+						>
+							{patterns.map((p) => (
+								<option key={p.id} value={p.id}>
+									{p.name}
+								</option>
+							))}
+						</select>
+					</div>
 				</div>
-				<div className="flex justify-end gap-2.5">
+
+				<div className="flex justify-end gap-2.5 pt-2">
 					<button
 						onClick={onClose}
 						className="px-4 py-2 rounded-xl text-xs font-medium hover:opacity-70"
@@ -736,19 +1336,15 @@ export const BatchModal: React.FC<{
 						{t.cancel}
 					</button>
 					<button
-						onClick={onSubmit}
-						disabled={isCreating}
-						className="px-4 py-2 font-bold rounded-xl text-xs shadow-md transition-all active:scale-95"
+						onClick={handleCreate}
+						disabled={isCreating || batchPaths.length === 0}
+						className="px-5 py-2 font-bold rounded-xl text-xs shadow-md transition-all active:scale-95 disabled:opacity-50"
 						style={{
 							backgroundColor: "var(--btn-primary-bg)",
 							color: "var(--btn-primary-text)",
 						}}
 					>
-						{isCreating
-							? "..."
-							: lang === "ru"
-								? "Сформировать очередь"
-								: "Generate Queue"}
+						{isCreating ? "..." : t.batchSubmit}
 					</button>
 				</div>
 			</div>
@@ -1003,11 +1599,7 @@ export const RescheduleModal: React.FC<{
 							}}
 						>
 							{Array.from({ length: 24 }).map((_, i) => (
-								<option
-									key={i}
-									value={i}
-									className="bg-slate-900 text-slate-100"
-								>
+								<option key={i} value={i}>
 									{i.toString().padStart(2, "0")}
 								</option>
 							))}
@@ -1028,11 +1620,7 @@ export const RescheduleModal: React.FC<{
 							{Array.from({ length: 12 }).map((_, i) => {
 								const m = i * 5;
 								return (
-									<option
-										key={m}
-										value={m}
-										className="bg-slate-900 text-slate-100"
-									>
+									<option key={m} value={m}>
 										{m.toString().padStart(2, "0")}
 									</option>
 								);

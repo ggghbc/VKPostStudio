@@ -41,6 +41,7 @@ export const api = {
 		invoke<PostItem[]>("get_queue", { targetId }),
 	getHistory: (targetId: number) =>
 		invoke<PostItem[]>("get_post_history", { targetId }),
+	getAllPosts: () => invoke<PostItem[]>("get_all_posts"),
 	syncVkQueue: (targetId: number) =>
 		invoke<SyncResult>("sync_vk_delayed_posts", { targetId }),
 	addPost: (params: any) => invoke<number>("add_post_to_queue", params),
