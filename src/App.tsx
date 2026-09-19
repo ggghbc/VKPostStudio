@@ -15,6 +15,7 @@ import {
 	AllPostsModal,
 	DeleteConfirmModal,
 	CleanDiskModal,
+	VkLivePreviewModal,
 } from "./components/Modals";
 import { api } from "./services/api";
 import {
@@ -107,22 +108,27 @@ export default function App() {
 	const [revertModalPost, setRevertModalPost] = useState<PostItem | null>(
 		null,
 	);
+
+	// Пакетная генерация
 	const [showBatchModal, setShowBatchModal] = useState(false);
+	const showBatchModalRef = useRef(showBatchModal);
+	showBatchModalRef.current = showBatchModal;
+
+	const [batchPaths, setBatchPaths] = useState<string[]>([]);
 	const [isBatchCreating, setIsBatchCreating] = useState(false);
 
-	// Сессионный режим подтверждения удаления
+	const [showLivePreviewModal, setShowLivePreviewModal] = useState(false);
+
 	const [skipDeleteConfirmSession, setSkipDeleteConfirmSession] =
 		useState(false);
 	const [postToDelete, setPostToDelete] = useState<PostItem | null>(null);
 
-	// Окно очистки диска
 	const [showCleanDiskModal, setShowCleanDiskModal] = useState(false);
 	const [cleanedDiskCount, setCleanedDiskCount] = useState<number | null>(
 		null,
 	);
 	const [isCleaningDisk, setIsCleaningDisk] = useState(false);
 
-	// Окно "Все посты"
 	const [showAllPostsModal, setShowAllPostsModal] = useState(false);
 
 	const [commentsOnPost, setCommentsOnPost] = useState(true);
@@ -163,7 +169,52 @@ export default function App() {
 		localStorage.setItem("vk_lang", newLang);
 	};
 
-	// Очистка недействительных токенов
+	useEffect(() => {
+		if (editingPostId === null) {
+			const draft = {
+				text: postText,
+				viewMode: attachmentsViewMode,
+				comments: commentsOnPost,
+				notify: notifyFollowers,
+				authorsName,
+				ad: adFromCreator,
+				filePaths: attachedFiles
+					.map((f) => f.path)
+					.filter((p) => Boolean(p)),
+			};
+			localStorage.setItem("vk_draft", JSON.stringify(draft));
+		}
+	}, [
+		postText,
+		attachedFiles,
+		attachmentsViewMode,
+		commentsOnPost,
+		notifyFollowers,
+		authorsName,
+		adFromCreator,
+		editingPostId,
+	]);
+
+	useEffect(() => {
+		try {
+			const raw = localStorage.getItem("vk_draft");
+			if (raw) {
+				const d = JSON.parse(raw);
+				if (d.text) setPostText(d.text);
+				if (d.viewMode) setAttachmentsViewMode(d.viewMode);
+				if (typeof d.comments === "boolean")
+					setCommentsOnPost(d.comments);
+				if (typeof d.notify === "boolean") setNotifyFollowers(d.notify);
+				if (typeof d.authorsName === "boolean")
+					setAuthorsName(d.authorsName);
+				if (typeof d.ad === "boolean") setAdFromCreator(d.ad);
+				if (Array.isArray(d.filePaths) && d.filePaths.length > 0) {
+					appendFiles(d.filePaths);
+				}
+			}
+		} catch {}
+	}, []);
+
 	const handleCleanExpiredTokens = async () => {
 		if (
 			!confirm(
@@ -184,7 +235,46 @@ export default function App() {
 		}
 	};
 
-	// Перехват drag-and-drop
+	useEffect(() => {
+		const handleWindowPaste = async (e: ClipboardEvent) => {
+			const items = e.clipboardData?.items;
+			if (!items) return;
+
+			for (let i = 0; i < items.length; i++) {
+				const item = items[i];
+				if (item.type.indexOf("image") !== -1) {
+					e.preventDefault();
+					const file = item.getAsFile();
+					if (file) {
+						const ext = file.type.split("/")[1] || "png";
+						const buffer = await file.arrayBuffer();
+						const bytes = Array.from(new Uint8Array(buffer));
+						try {
+							const savedPath = await api.savePastedImage(
+								bytes,
+								ext,
+							);
+							if (showBatchModalRef.current) {
+								setBatchPaths((prev) =>
+									Array.from(new Set([...prev, savedPath])),
+								);
+							} else {
+								await appendFiles([savedPath]);
+							}
+						} catch (err) {
+							console.error("Ошибка сохранения из буфера:", err);
+						}
+					}
+					break;
+				}
+			}
+		};
+
+		window.addEventListener("paste", handleWindowPaste);
+		return () => window.removeEventListener("paste", handleWindowPaste);
+	}, []);
+
+	// Перехват системного drag-and-drop: разделение между окном пакетного постинга и обычным конструктором
 	useEffect(() => {
 		let isCancelled = false;
 		let unDrop: (() => void) | undefined;
@@ -201,7 +291,14 @@ export default function App() {
 				lastDropTimeRef.current = now;
 
 				const rawPaths: string[] = event.payload?.paths || [];
-				if (rawPaths.length > 0) {
+				if (rawPaths.length === 0) return;
+
+				// Если открыто модальное окно пакетной генерации — направляем файлы строго в него
+				if (showBatchModalRef.current) {
+					setBatchPaths((prev) =>
+						Array.from(new Set([...prev, ...rawPaths])),
+					);
+				} else {
 					await appendFiles(rawPaths);
 				}
 			});
@@ -397,20 +494,22 @@ export default function App() {
 
 	const syncVkQueue = async (tId: number) => {
 		setIsSyncingVk(true);
+		const safetyTimer = setTimeout(() => setIsSyncingVk(false), 14000);
 		try {
 			const res = await api.syncVkQueue(tId);
 			setQueue(res.posts);
-			loadHistory(tId);
-			loadAllPosts();
+			await loadHistory(tId);
+			await loadAllPosts();
 		} catch (e) {
 			console.error(e);
 			try {
 				const q = await api.getQueue(tId);
 				setQueue(q);
-				loadHistory(tId);
-				loadAllPosts();
+				await loadHistory(tId);
+				await loadAllPosts();
 			} catch {}
 		} finally {
+			clearTimeout(safetyTimer);
 			setIsSyncingVk(false);
 		}
 	};
@@ -504,6 +603,7 @@ export default function App() {
 			setEditingPostId(null);
 			setPostText("");
 			setAttachedFiles([]);
+			localStorage.removeItem("vk_draft");
 			syncVkQueue(selectedTargetId);
 			return;
 		}
@@ -529,6 +629,7 @@ export default function App() {
 		setPostText("");
 		setAttachedFiles([]);
 		setIsManualTime(false);
+		localStorage.removeItem("vk_draft");
 		syncVkQueue(selectedTargetId);
 	};
 
@@ -540,7 +641,11 @@ export default function App() {
 
 		if (post.status === "transferred_to_vk") {
 			await api.deleteVkPost(pid).catch(console.error);
-		} else if (post.status === "archived") {
+		} else if (
+			post.status === "archived" ||
+			post.status === "published" ||
+			post.status === "deleted_in_vk"
+		) {
 			await api.deleteHistoryPost(pid).catch(console.error);
 		} else {
 			await api.deleteLocalPost(pid).catch(console.error);
@@ -581,6 +686,52 @@ export default function App() {
 		}
 	};
 
+	const handleLoadVkPhotos = async (post: PostItem) => {
+		if (!post.vk_post_id) return;
+		try {
+			const photos = await api.fetchVkPhotos(
+				post.target_id,
+				post.vk_post_id,
+			);
+			if (photos.length === 0) {
+				alert(
+					lang === "ru"
+						? "У поста нет фото вложений"
+						: "No photo attachments found",
+				);
+				return;
+			}
+
+			const newAttachments = photos.map((ph, idx) => ({
+				id: -(idx + 1),
+				file_name: ph.file_name,
+				size_bytes: 0,
+				thumb_data: ph.data_url,
+			}));
+
+			const updater = (prevList: PostItem[]) =>
+				prevList.map((p) =>
+					p.id === post.id
+						? {
+								...p,
+								attachments: newAttachments,
+								attachments_count: newAttachments.length,
+							}
+						: p,
+				);
+
+			setQueue(updater);
+			setHistoryPosts(updater);
+			setAllPosts(updater);
+
+			if (photos[0]?.data_url) {
+				setFullViewImage(photos[0].data_url);
+			}
+		} catch (e) {
+			alert("Error: " + e);
+		}
+	};
+
 	const handleDeletePattern = async (id: number) => {
 		if (
 			!confirm(
@@ -614,6 +765,7 @@ export default function App() {
 			: activeQueueTab === "vk"
 				? vkDelayedPosts
 				: historyPosts;
+	const currentTarget = targets.find((t) => t.id === selectedTargetId);
 
 	return (
 		<div
@@ -652,8 +804,8 @@ export default function App() {
 					localStorage.setItem("vk_selected_target", id.toString());
 				}}
 				onOpenSettings={() => setShowSettingsModal(true)}
-				onOpenAllPostsModal={() => {
-					loadAllPosts();
+				onOpenAllPostsModal={async () => {
+					await loadAllPosts();
 					setShowAllPostsModal(true);
 				}}
 				onToggleRightPanel={() =>
@@ -686,7 +838,7 @@ export default function App() {
 					viewMonth={viewMonth}
 					nextSlotDisplay={nextSlotDisplay}
 					selectedTargetId={selectedTargetId}
-					isDraggingOver={isDraggingOver}
+					isDraggingOver={isDraggingOver && !showBatchModal}
 					lang={lang}
 					onTextChange={setPostText}
 					onSelectPattern={setSelectedPatternId}
@@ -705,6 +857,7 @@ export default function App() {
 					}
 					onSetFullView={setFullViewImage}
 					onOpenBatchModal={() => setShowBatchModal(true)}
+					onOpenLivePreview={() => setShowLivePreviewModal(true)}
 					onSetViewMode={setAttachmentsViewMode}
 					onToggleComments={setCommentsOnPost}
 					onToggleNotify={setNotifyFollowers}
@@ -813,8 +966,23 @@ export default function App() {
 					}}
 					onDeletePost={handleDeleteRequest}
 					onOpenFullImage={setFullViewImage}
+					onLoadVkPhotos={handleLoadVkPhotos}
 				/>
 			</main>
+
+			<VkLivePreviewModal
+				show={showLivePreviewModal}
+				lang={lang}
+				targetTitle={currentTarget?.title || "Сообщество"}
+				postText={postText}
+				attachedFiles={attachedFiles}
+				viewMode={attachmentsViewMode}
+				authorsName={authorsName}
+				adFromCreator={adFromCreator}
+				commentsOnPost={commentsOnPost}
+				slotDisplay={nextSlotDisplay}
+				onClose={() => setShowLivePreviewModal(false)}
+			/>
 
 			<DeleteConfirmModal
 				show={postToDelete !== null}
@@ -838,6 +1006,8 @@ export default function App() {
 				posts={allPosts}
 				onClose={() => setShowAllPostsModal(false)}
 				onDeletePost={handleDeleteRequest}
+				onOpenFullImage={setFullViewImage}
+				onLoadVkPhotos={handleLoadVkPhotos}
 			/>
 
 			<SettingsModal
@@ -935,6 +1105,7 @@ export default function App() {
 				onDeletePattern={handleDeletePattern}
 			/>
 
+			{/* Окно пакетной генерации с привязкой drag-and-drop */}
 			<BatchModal
 				show={showBatchModal}
 				lang={lang}
@@ -943,7 +1114,13 @@ export default function App() {
 				patterns={patterns}
 				selectedPatternId={selectedPatternId}
 				isCreating={isBatchCreating}
-				onClose={() => setShowBatchModal(false)}
+				batchPaths={batchPaths}
+				isDraggingOver={isDraggingOver && showBatchModal}
+				onSetBatchPaths={setBatchPaths}
+				onClose={() => {
+					setShowBatchModal(false);
+					setBatchPaths([]);
+				}}
 				onSubmit={async (params) => {
 					setIsBatchCreating(true);
 					try {
@@ -960,6 +1137,7 @@ export default function App() {
 							attachmentsViewMode,
 						});
 						setShowBatchModal(false);
+						setBatchPaths([]);
 						if (selectedTargetId) syncVkQueue(selectedTargetId);
 						alert(
 							`${lang === "ru" ? "Создано постов в очередь:" : "Posts generated into queue:"} ${count}`,

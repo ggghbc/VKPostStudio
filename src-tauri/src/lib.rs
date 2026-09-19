@@ -118,6 +118,7 @@ pub fn run() {
             commands::post::get_queue,
             commands::post::get_post_history,
             commands::post::get_all_posts,
+            commands::post::fetch_vk_post_photos,
             commands::post::sync_vk_delayed_posts,
             commands::post::revert_vk_post_to_local_same_time,
             commands::post::revert_vk_post_to_local_next_slot,
@@ -130,6 +131,7 @@ pub fn run() {
             commands::post::add_post_to_queue,
             commands::post::start_transfer_pipeline,
             commands::system::get_file_preview_base64,
+            commands::system::save_pasted_image_bytes,
             commands::system::init_client_timezone,
             commands::system::backup_database,
         ])

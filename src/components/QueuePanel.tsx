@@ -1,3 +1,4 @@
+import React from "react";
 import { format } from "date-fns";
 import {
 	Clock,
@@ -18,6 +19,7 @@ import {
 	RotateCcw,
 	Calendar,
 	FileText,
+	DownloadCloud,
 } from "lucide-react";
 import { PostItem } from "../types";
 import { ContentCalendar } from "./ContentCalendar";
@@ -50,6 +52,7 @@ interface QueuePanelProps {
 	onOpenRescheduleModal: (post: PostItem) => void;
 	onDeletePost: (post: PostItem) => void;
 	onOpenFullImage: (url: string) => void;
+	onLoadVkPhotos: (post: PostItem) => void;
 }
 
 export const QueuePanel: React.FC<QueuePanelProps> = ({
@@ -79,6 +82,7 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
 	onOpenRescheduleModal,
 	onDeletePost,
 	onOpenFullImage,
+	onLoadVkPhotos,
 }) => {
 	const t = translations[lang];
 
@@ -91,9 +95,10 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
 			}`}
 			style={{ backgroundColor: "var(--bg-surface-sub)" }}
 		>
-			<div className="mb-4 flex items-center justify-between gap-3 flex-wrap">
+			<div className="mb-4 flex items-center justify-between gap-2.5 flex-nowrap">
+				{/* Ультра-компактные вкладки: иконка + счётчик без длинных слов */}
 				<div
-					className="inline-flex items-center rounded-xl p-1 border gap-1 shadow-inner"
+					className="inline-flex items-center rounded-xl p-1 border gap-1 shadow-inner flex-shrink-0"
 					style={{
 						backgroundColor: "var(--bg-surface)",
 						borderColor: "var(--border-app)",
@@ -101,7 +106,7 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
 				>
 					<button
 						onClick={() => onSetTab("local")}
-						className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+						className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all"
 						style={{
 							backgroundColor:
 								activeQueueTab === "local"
@@ -112,17 +117,17 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
 									? "var(--tab-active-text)"
 									: "var(--text-muted)",
 						}}
+						title={t.localQueue}
 					>
 						<Clock className="h-3.5 w-3.5" />
-						<span>{t.localQueue}</span>
-						<span className="ml-0.5 text-[10px] font-mono px-1.5 py-0.2 rounded-full border border-black/10 opacity-80">
+						<span className="text-[10px] font-mono px-1 rounded-full border border-black/10 opacity-85 font-bold">
 							{localPosts.length}
 						</span>
 					</button>
 
 					<button
 						onClick={() => onSetTab("vk")}
-						className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+						className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all"
 						style={{
 							backgroundColor:
 								activeQueueTab === "vk"
@@ -133,17 +138,17 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
 									? "var(--tab-active-text)"
 									: "var(--text-muted)",
 						}}
+						title={t.vkDelayed}
 					>
 						<Cloud className="h-3.5 w-3.5" />
-						<span>{t.vkDelayed}</span>
-						<span className="ml-0.5 text-[10px] font-mono px-1.5 py-0.2 rounded-full border border-black/10 opacity-80">
+						<span className="text-[10px] font-mono px-1 rounded-full border border-black/10 opacity-85 font-bold">
 							{vkDelayedPosts.length}
 						</span>
 					</button>
 
 					<button
 						onClick={() => onSetTab("history")}
-						className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+						className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all"
 						style={{
 							backgroundColor:
 								activeQueueTab === "history"
@@ -154,16 +159,17 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
 									? "var(--tab-active-text)"
 									: "var(--text-muted)",
 						}}
+						title={t.history}
 					>
 						<History className="h-3.5 w-3.5" />
-						<span>{t.history}</span>
-						<span className="ml-0.5 text-[10px] font-mono px-1.5 py-0.2 rounded-full border border-black/10 opacity-80">
+						<span className="text-[10px] font-mono px-1 rounded-full border border-black/10 opacity-85 font-bold">
 							{historyPosts.length}
 						</span>
 					</button>
 				</div>
 
-				<div className="flex items-center gap-2 ml-auto">
+				{/* Правые кнопки действий */}
+				<div className="flex items-center gap-1.5 ml-auto flex-shrink-0">
 					<div
 						className="flex items-center border rounded-xl p-0.5"
 						style={{
@@ -251,7 +257,7 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
 										p.status === "failed",
 								).length === 0
 							}
-							className="flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold transition-all shadow-md active:scale-95 disabled:opacity-40"
+							className="flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-bold transition-all shadow-md active:scale-95 disabled:opacity-40"
 							style={{
 								backgroundColor: "var(--btn-primary-bg)",
 								color: "var(--btn-primary-text)",
@@ -480,7 +486,8 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
 													{t.actions}
 												</span>
 
-												{!isVkPost && (
+												{/* Кнопка "В редактор" скрыта для опубликованных постов */}
+												{!isVkPost && !isPublished && (
 													<button
 														onClick={(e) => {
 															e.stopPropagation();
@@ -508,6 +515,32 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
 														</span>
 													</button>
 												)}
+
+												{/* Кнопка загрузки картинок из ВК */}
+												{isPublished &&
+													post.vk_post_id && (
+														<button
+															onClick={(e) => {
+																e.stopPropagation();
+																onLoadVkPhotos(
+																	post,
+																);
+															}}
+															className="px-3 py-1.5 rounded-lg border text-xs font-semibold flex items-center gap-1.5 hover:opacity-80 transition-all"
+															style={{
+																backgroundColor:
+																	"var(--bg-surface-sub)",
+																borderColor:
+																	"var(--border-light)",
+																color: "var(--accent)",
+															}}
+														>
+															<DownloadCloud className="h-3.5 w-3.5" />
+															<span>
+																{t.loadVkPhotos}
+															</span>
+														</button>
+													)}
 
 												{isVkPost && (
 													<button

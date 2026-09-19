@@ -3,6 +3,7 @@ use reqwest::header::{HeaderMap, HeaderValue, ACCEPT_LANGUAGE, USER_AGENT};
 use reqwest::{multipart, Client};
 use serde::Deserialize;
 use std::path::Path;
+use std::time::Duration;
 
 #[derive(Clone)]
 pub struct VkClient {
@@ -82,6 +83,7 @@ impl VkClient {
 
         let http = Client::builder()
             .default_headers(headers)
+            .timeout(Duration::from_secs(12))
             .build()
             .unwrap();
 
@@ -294,6 +296,20 @@ impl VkClient {
         Ok(result)
     }
 
+    // Проверка, опубликован ли пост реально на стене (или он был удалён из отложки пользователем)
+    pub async fn check_wall_post_published(&self, owner_id: i64, post_id: i64) -> Result<bool> {
+        let post_key = format!("{}_{}", owner_id, post_id);
+        let url = format!(
+            "https://api.vk.com/method/wall.getById?access_token={}&v={}&posts={}",
+            self.token, self.v, post_key
+        );
+        let resp_val: serde_json::Value = self.http.get(&url).send().await?.json().await?;
+        if let Some(arr) = resp_val.get("response").and_then(|v| v.as_array()) {
+            return Ok(!arr.is_empty());
+        }
+        Ok(false)
+    }
+
     pub async fn delete_wall_post(&self, owner_id: i64, post_id: i64) -> Result<()> {
         let clean_owner_id = -owner_id.abs();
         let owner_id_str = clean_owner_id.to_string();
@@ -325,7 +341,6 @@ impl VkClient {
             .unwrap_or("jpg")
             .to_lowercase();
 
-        // Безопасное латинское имя файла исключает сбои Apache/Nginx сервера загрузки VK
         let safe_name = format!("upload_{}.{}", rand::random::<u32>(), ext);
 
         let is_group = target_owner_id < 0;

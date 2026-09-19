@@ -33,6 +33,7 @@ pub struct PostDto {
     pub mute_notifications: bool,
     pub mark_as_ads: bool,
     pub target_id: i64,
+    pub vk_post_id: Option<i64>,
     pub target_title: Option<String>,
     pub attachments: Vec<AttachmentDto>,
 }
@@ -52,6 +53,12 @@ pub struct UpdateAttachmentInput {
     pub thumb_data: Option<String>,
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct DownloadedVkPhotoDto {
+    pub file_name: String,
+    pub data_url: String,
+}
+
 fn get_thumbs_dir(app: &AppHandle) -> PathBuf {
     let dir = app.path().app_data_dir().unwrap_or_else(|_| PathBuf::from(".")).join("thumbnails");
     std::fs::create_dir_all(&dir).ok();
@@ -60,26 +67,27 @@ fn get_thumbs_dir(app: &AppHandle) -> PathBuf {
 
 fn map_post_row(r: &sqlx::sqlite::SqliteRow, attachments: Vec<AttachmentDto>) -> PostDto {
     PostDto {
-        id: r.get("id"),
-        text: r.get("text"),
-        scheduled_at_utc: r.get("scheduled_at_utc"),
-        status: r.get("status"),
-        error_message: r.get("error_message"),
+        id: r.try_get::<i64, _>("id").unwrap_or(0),
+        text: r.try_get::<String, _>("text").unwrap_or_default(),
+        scheduled_at_utc: r.try_get::<String, _>("scheduled_at_utc").unwrap_or_default(),
+        status: r.try_get::<String, _>("status").unwrap_or_else(|_| "queued".to_string()),
+        error_message: r.try_get::<Option<String>, _>("error_message").unwrap_or(None),
         attachments_count: attachments.len() as i64,
-        attachments_view_mode: r.try_get("attachments_view_mode").unwrap_or_else(|_| "grid".to_string()),
+        attachments_view_mode: r.try_get::<String, _>("attachments_view_mode").unwrap_or_else(|_| "grid".to_string()),
         signed: r.try_get::<i64, _>("signed").unwrap_or(0) == 1,
         close_comments: r.try_get::<i64, _>("close_comments").unwrap_or(0) == 1,
         mute_notifications: r.try_get::<i64, _>("mute_notifications").unwrap_or(0) == 1,
         mark_as_ads: r.try_get::<i64, _>("mark_as_ads").unwrap_or(0) == 1,
-        target_id: r.try_get("target_id").unwrap_or(0),
-        target_title: r.try_get("target_title").ok(),
+        target_id: r.try_get::<i64, _>("target_id").unwrap_or(0),
+        vk_post_id: r.try_get::<Option<i64>, _>("vk_post_id").unwrap_or(None),
+        target_title: r.try_get::<Option<String>, _>("target_title").unwrap_or(None),
         attachments,
     }
 }
 
 async fn get_attachments_for_post(db: &sqlx::SqlitePool, post_id: i64, thumbs_dir: &PathBuf) -> Vec<AttachmentDto> {
     let att_rows = sqlx::query(
-        "SELECT id, file_name, size_bytes, local_path, vk_attachment_string 
+        "SELECT id, file_name, size_bytes, local_path, vk_attachment_string, order_index 
          FROM attachments WHERE post_id = ? ORDER BY order_index ASC"
     )
     .bind(post_id)
@@ -91,6 +99,15 @@ async fn get_attachments_for_post(db: &sqlx::SqlitePool, post_id: i64, thumbs_di
     for a in att_rows {
         let att_id: i64 = a.get("id");
         let local_path: Option<String> = a.get("local_path");
+        let raw_name: String = a.try_get("file_name").unwrap_or_else(|_| "файл".to_string());
+
+        let file_name = if raw_name == "vk_media" {
+            let idx: i64 = a.try_get("order_index").unwrap_or(0);
+            format!("Фото ВКонтакте #{}", idx + 1)
+        } else {
+            raw_name
+        };
+
         let thumb_path = thumbs_dir.join(format!("{}.thumb", att_id));
         let thumb_data = if thumb_path.exists() {
             std::fs::read_to_string(&thumb_path).ok()
@@ -103,10 +120,10 @@ async fn get_attachments_for_post(db: &sqlx::SqlitePool, post_id: i64, thumbs_di
 
         attachments.push(AttachmentDto {
             id: att_id,
-            file_name: a.get("file_name"),
-            size_bytes: a.get("size_bytes"),
+            file_name,
+            size_bytes: a.try_get("size_bytes").unwrap_or(0),
             local_path,
-            vk_attachment_string: a.get("vk_attachment_string"),
+            vk_attachment_string: a.try_get("vk_attachment_string").ok(),
             thumb_data,
         });
     }
@@ -117,10 +134,11 @@ async fn get_attachments_for_post(db: &sqlx::SqlitePool, post_id: i64, thumbs_di
 pub async fn get_queue(target_id: i64, app: AppHandle, state: State<'_, AppState>) -> Result<Vec<PostDto>, String> {
     let posts_rows = sqlx::query(
         "SELECT p.id, p.target_id, t.title as target_title, p.text, p.scheduled_at_utc, p.status, p.error_message, p.attachments_view_mode,
-                p.signed, p.close_comments, p.mute_notifications, p.mark_as_ads 
+                p.signed, p.close_comments, p.mute_notifications, p.mark_as_ads, p.vk_post_id 
          FROM posts p
          JOIN targets t ON p.target_id = t.id
-         WHERE t.owner_id = (SELECT owner_id FROM targets WHERE id = ?) AND p.status != 'archived' 
+         WHERE t.owner_id = (SELECT owner_id FROM targets WHERE id = ?) 
+           AND p.status IN ('queued', 'failed') 
          ORDER BY datetime(p.scheduled_at_utc) ASC"
     )
     .bind(target_id)
@@ -144,7 +162,7 @@ pub async fn get_queue(target_id: i64, app: AppHandle, state: State<'_, AppState
 pub async fn get_post_history(target_id: i64, app: AppHandle, state: State<'_, AppState>) -> Result<Vec<PostDto>, String> {
     let posts_rows = sqlx::query(
         "SELECT p.id, p.target_id, t.title as target_title, p.text, p.scheduled_at_utc, p.status, p.error_message, p.attachments_view_mode,
-                p.signed, p.close_comments, p.mute_notifications, p.mark_as_ads 
+                p.signed, p.close_comments, p.mute_notifications, p.mark_as_ads, p.vk_post_id 
          FROM posts p
          JOIN targets t ON p.target_id = t.id
          WHERE t.owner_id = (SELECT owner_id FROM targets WHERE id = ?)
@@ -167,13 +185,12 @@ pub async fn get_post_history(target_id: i64, app: AppHandle, state: State<'_, A
     Ok(result)
 }
 
-// Запрос ВСЕХ постов приложения со всех сообществ с информацией о цели
 #[tauri::command]
 pub async fn get_all_posts(app: AppHandle, state: State<'_, AppState>) -> Result<Vec<PostDto>, String> {
     let posts_rows = sqlx::query(
         "SELECT p.id, p.target_id, COALESCE(t.title, 'Неизвестная цель') as target_title, 
                 p.text, p.scheduled_at_utc, p.status, p.error_message, p.attachments_view_mode,
-                p.signed, p.close_comments, p.mute_notifications, p.mark_as_ads 
+                p.signed, p.close_comments, p.mute_notifications, p.mark_as_ads, p.vk_post_id 
          FROM posts p
          LEFT JOIN targets t ON p.target_id = t.id
          ORDER BY p.id DESC"
@@ -186,9 +203,95 @@ pub async fn get_all_posts(app: AppHandle, state: State<'_, AppState>) -> Result
     let mut result = Vec::new();
 
     for r in posts_rows {
-        let post_id: i64 = r.get("id");
+        let post_id: i64 = r.try_get("id").unwrap_or(0);
         let attachments = get_attachments_for_post(&state.db, post_id, &thumbs_dir).await;
         result.push(map_post_row(&r, attachments));
+    }
+
+    Ok(result)
+}
+
+#[tauri::command]
+pub async fn fetch_vk_post_photos(
+    target_id: i64,
+    vk_post_id: i64,
+    state: State<'_, AppState>,
+) -> Result<Vec<DownloadedVkPhotoDto>, String> {
+    let target_row = sqlx::query("SELECT account_id, owner_id FROM targets WHERE id = ?")
+        .bind(target_id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let account_id: i64 = target_row.get("account_id");
+    let owner_id: i64 = target_row.get("owner_id");
+
+    let token_row = sqlx::query("SELECT token FROM accounts WHERE id = ?")
+        .bind(account_id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let token: String = token_row.get("token");
+    let client = reqwest::Client::new();
+    let post_query = format!("{}_{}", owner_id, vk_post_id);
+
+    let request_url = format!(
+        "https://api.vk.com/method/wall.getById?access_token={}&v=5.131&posts={}",
+        token, post_query
+    );
+
+    let res_val: serde_json::Value = client
+        .get(&request_url)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .json()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let posts_arr = res_val
+        .get("response")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| format!("VK API error: {:?}", res_val.get("error")))?;
+
+    let post_obj = posts_arr.first().ok_or_else(|| "Пост не найден в ВК".to_string())?;
+    let attachments = post_obj.get("attachments").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+
+    let mut result = Vec::new();
+
+    for (idx, att) in attachments.iter().enumerate() {
+        if att.get("type").and_then(|v| v.as_str()) == Some("photo") {
+            if let Some(photo) = att.get("photo") {
+                if let Some(sizes) = photo.get("sizes").and_then(|v| v.as_array()) {
+                    if let Some(best_size) = sizes.last() {
+                        if let Some(url_str) = best_size.get("url").and_then(|v| v.as_str()) {
+                            if let Ok(resp) = client.get(url_str).send().await {
+                                if let Ok(bytes) = resp.bytes().await {
+                                    const CHARSET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+                                    let mut b64 = String::with_capacity((bytes.len() + 2) / 3 * 4);
+                                    for chunk in bytes.chunks(3) {
+                                        let b0 = chunk[0] as usize;
+                                        let b1 = chunk.get(1).copied().unwrap_or(0) as usize;
+                                        let b2 = chunk.get(2).copied().unwrap_or(0) as usize;
+                                        let triple = (b0 << 16) | (b1 << 8) | b2;
+                                        b64.push(CHARSET[(triple >> 18) & 0x3F] as char);
+                                        b64.push(CHARSET[(triple >> 12) & 0x3F] as char);
+                                        if chunk.len() > 1 { b64.push(CHARSET[(triple >> 6) & 0x3F] as char); } else { b64.push('='); }
+                                        if chunk.len() > 2 { b64.push(CHARSET[triple & 0x3F] as char); } else { b64.push('='); }
+                                    }
+
+                                    result.push(DownloadedVkPhotoDto {
+                                        file_name: format!("Фото ВК #{}", idx + 1),
+                                        data_url: format!("data:image/jpeg;base64,{}", b64),
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     Ok(result)
@@ -279,6 +382,7 @@ pub async fn sync_vk_delayed_posts(target_id: i64, app: AppHandle, state: State<
                 }
             }
 
+            // Проверяем статус постов, покинувших список отложки
             let local_scheduled = sqlx::query(
                 "SELECT id, vk_post_id FROM posts 
                  WHERE target_id = ? AND status = 'transferred_to_vk' 
@@ -293,7 +397,12 @@ pub async fn sync_vk_delayed_posts(target_id: i64, app: AppHandle, state: State<
                 let pid: i64 = row.get("id");
                 let vk_id: i64 = row.get("vk_post_id");
                 if !vk_post_ids.contains(&vk_id) {
-                    sqlx::query("UPDATE posts SET status = 'archived' WHERE id = ?")
+                    // Если пост исчез из отложки, проверяем, опубликован ли он на стене
+                    let is_published = vk.check_wall_post_published(owner_id, vk_id).await.unwrap_or(false);
+                    let new_status = if is_published { "published" } else { "deleted_in_vk" };
+
+                    sqlx::query("UPDATE posts SET status = ? WHERE id = ?")
+                        .bind(new_status)
                         .bind(pid)
                         .execute(&state.db)
                         .await
@@ -390,11 +499,8 @@ pub async fn revert_vk_post_to_local_next_slot(post_id: i64, pattern_id: i64, st
 
 #[tauri::command]
 pub async fn delete_local_post(post_id: i64, state: State<'_, AppState>) -> Result<(), String> {
-    sqlx::query("UPDATE posts SET status = 'archived' WHERE id = ?")
-        .bind(post_id)
-        .execute(&state.db)
-        .await
-        .map_err(|e| e.to_string())?;
+    sqlx::query("DELETE FROM attachments WHERE post_id = ?").bind(post_id).execute(&state.db).await.map_err(|e| e.to_string())?;
+    sqlx::query("DELETE FROM posts WHERE id = ?").bind(post_id).execute(&state.db).await.map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -423,11 +529,8 @@ pub async fn delete_vk_post(post_id: i64, state: State<'_, AppState>) -> Result<
         }
     }
 
-    sqlx::query("UPDATE posts SET status = 'archived' WHERE id = ?")
-        .bind(post_id)
-        .execute(&state.db)
-        .await
-        .map_err(|e| e.to_string())?;
+    sqlx::query("DELETE FROM attachments WHERE post_id = ?").bind(post_id).execute(&state.db).await.map_err(|e| e.to_string())?;
+    sqlx::query("DELETE FROM posts WHERE id = ?").bind(post_id).execute(&state.db).await.map_err(|e| e.to_string())?;
 
     Ok(())
 }
@@ -441,7 +544,6 @@ pub async fn delete_history_post(post_id: i64, state: State<'_, AppState>) -> Re
     Ok(())
 }
 
-// Обновление поста с точной синхронизацией вложений
 #[tauri::command]
 pub async fn update_post(
     post_id: i64,
@@ -471,7 +573,6 @@ pub async fn update_post(
     .await
     .map_err(|e| e.to_string())?;
 
-    // Всегда полностью очищаем старые вложения и сохраняем актуальный набор из редактора
     sqlx::query("DELETE FROM attachments WHERE post_id = ?")
         .bind(post_id)
         .execute(&mut *tx)
@@ -521,7 +622,7 @@ pub async fn clean_uploaded_local_files(target_id: i64, state: State<'_, AppStat
          JOIN posts p ON a.post_id = p.id 
          JOIN targets t ON p.target_id = t.id
          WHERE t.owner_id = (SELECT owner_id FROM targets WHERE id = ?)
-           AND p.status = 'transferred_to_vk' 
+           AND p.status IN ('transferred_to_vk', 'published') 
            AND a.local_path IS NOT NULL"
     )
     .bind(target_id)

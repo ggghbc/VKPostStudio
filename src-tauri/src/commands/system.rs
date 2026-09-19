@@ -95,3 +95,16 @@ pub async fn get_file_preview_base64(path: String) -> Result<String, String> {
     let b64 = encode_base64(&bytes);
     Ok(format!("data:{};base64,{}", mime, b64))
 }
+
+#[tauri::command]
+pub async fn save_pasted_image_bytes(bytes: Vec<u8>, ext: String, app: AppHandle) -> Result<String, String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let pasted_dir = app_dir.join("pasted_images");
+    tokio::fs::create_dir_all(&pasted_dir).await.map_err(|e| e.to_string())?;
+
+    let file_name = format!("paste_{}_{}.{}", chrono::Utc::now().timestamp_millis(), rand::random::<u32>(), ext);
+    let file_path = pasted_dir.join(file_name);
+    tokio::fs::write(&file_path, bytes).await.map_err(|e| e.to_string())?;
+
+    Ok(file_path.to_string_lossy().to_string())
+}

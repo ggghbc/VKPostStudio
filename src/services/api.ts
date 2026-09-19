@@ -7,6 +7,8 @@ export const api = {
 	backupDatabase: () => invoke<string>("backup_database"),
 	getFilePreview: (path: string) =>
 		invoke<string>("get_file_preview_base64", { path }),
+	savePastedImage: (bytes: number[], ext: string) =>
+		invoke<string>("save_pasted_image_bytes", { bytes, ext }),
 	openBrowserAuth: () => invoke("open_vk_auth_browser"),
 
 	getAccounts: () => invoke<Account[]>("get_accounts"),
@@ -42,6 +44,11 @@ export const api = {
 	getHistory: (targetId: number) =>
 		invoke<PostItem[]>("get_post_history", { targetId }),
 	getAllPosts: () => invoke<PostItem[]>("get_all_posts"),
+	fetchVkPhotos: (targetId: number, vkPostId: number) =>
+		invoke<{ file_name: string; data_url: string }[]>(
+			"fetch_vk_post_photos",
+			{ targetId, vkPostId },
+		),
 	syncVkQueue: (targetId: number) =>
 		invoke<SyncResult>("sync_vk_delayed_posts", { targetId }),
 	addPost: (params: any) => invoke<number>("add_post_to_queue", params),

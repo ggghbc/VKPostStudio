@@ -33,7 +33,7 @@
 [data-theme="ocean"] {
 	color-scheme: dark;
 	--bg-app: #03045e;
-	--bg-header: #03045e;
+	--bg-header: #02033b;
 	--bg-surface: #03045e;
 	--bg-surface-sub: #07176b;
 	--bg-surface-hover: #0077b6;
@@ -42,27 +42,27 @@
 	--text-app: #caf0f8;
 	--text-muted: #90e0ef;
 	--text-dim: #00b4d8;
-	--accent: #00b4d8;
-	--accent-hover: #90e0ef;
-	--accent-glow: rgba(0, 180, 216, 0.3);
-	--btn-primary-bg: #00b4d8;
-	--btn-primary-text: #03045e;
-	--btn-primary-hover: #90e0ef;
+	--accent: #0077b6;
+	--accent-hover: #00b4d8;
+	--accent-glow: rgba(0, 119, 182, 0.35);
+	--btn-primary-bg: #0077b6;
+	--btn-primary-text: #caf0f8;
+	--btn-primary-hover: #00b4d8;
 	--btn-secondary-bg: #07176b;
 	--btn-secondary-border: #0077b6;
 	--btn-secondary-text: #caf0f8;
-	--tab-active-bg: #00b4d8;
-	--tab-active-text: #03045e;
+	--tab-active-bg: #0077b6;
+	--tab-active-text: #caf0f8;
 }
 
 /* 3. Soft Pink Delight: ["#ffe5ec","#ffc2d1","#ffb3c6","#ff8fab","#fb6f92"] */
 [data-theme="pink"] {
 	color-scheme: light;
-	--bg-app: #ffe5ec;
+	--bg-app: #ffd0dd;
 	--bg-header: #ffc2d1;
-	--bg-surface: #ffc2d1;
-	--bg-surface-sub: #ffb3c6;
-	--bg-surface-hover: #ff8fab;
+	--bg-surface: #ffc5d4;
+	--bg-surface-sub: #ffd9e3;
+	--bg-surface-hover: #ffb3c6;
 	--border-app: #ffb3c6;
 	--border-light: #ff8fab;
 	--text-app: #fb6f92;
@@ -133,6 +133,32 @@
 	--tab-active-text: #f8f9fa;
 }
 
+/* 6. Golden Twilight: ["#000814","#001d3d","#003566","#ffc300","#ffd60a"] */
+[data-theme="twilight"] {
+	color-scheme: dark;
+	--bg-app: #000814;
+	--bg-header: #001d3d;
+	--bg-surface: #001d3d;
+	--bg-surface-sub: #003566;
+	--bg-surface-hover: #00407a;
+	--border-app: #003566;
+	--border-light: #ffc300;
+	--text-app: #ceaf13;
+	--text-muted: #ffc300;
+	--text-dim: #ffc300;
+	--accent: #e7b201;
+	--accent-hover: #e9c200;
+	--accent-glow: rgba(255, 195, 0, 0.25);
+	--btn-primary-bg: #ffd60a;
+	--btn-primary-text: #000814;
+	--btn-primary-hover: #ffc300;
+	--btn-secondary-bg: #003566;
+	--btn-secondary-border: #e7b100;
+	--btn-secondary-text: #e9c201;
+	--tab-active-bg: #dbb700;
+	--tab-active-text: #000814;
+}
+
 html,
 body,
 #root {
@@ -148,7 +174,6 @@ body,
 	user-select: none;
 }
 
-/* Глобальное оформление полей ввода и плейсхолдеров */
 input,
 textarea,
 select {
@@ -163,7 +188,6 @@ textarea::placeholder {
 	opacity: 0.85 !important;
 }
 
-/* Выпадающие списки и пункты меню */
 select {
 	cursor: pointer;
 }
@@ -171,7 +195,6 @@ select {
 select option {
 	background-color: var(--bg-surface) !important;
 	color: var(--text-app) !important;
-	padding: 6px 10px;
 }
 
 select option:hover,

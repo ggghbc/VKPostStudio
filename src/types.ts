@@ -1,4 +1,10 @@
-export type Theme = "pastel" | "ocean" | "pink" | "earthy" | "steel";
+export type Theme =
+	| "pastel"
+	| "ocean"
+	| "pink"
+	| "earthy"
+	| "steel"
+	| "twilight";
 
 export interface Account {
 	id: number;
@@ -44,6 +50,7 @@ export interface PostItem {
 	mute_notifications: boolean;
 	mark_as_ads: boolean;
 	target_id: number;
+	vk_post_id?: number | null;
 	target_title?: string;
 	attachments: AttachmentItem[];
 }

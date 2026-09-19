@@ -18,6 +18,7 @@ import {
 	Save,
 	Plus,
 	Layers3,
+	Eye,
 } from "lucide-react";
 import {
 	format,
@@ -33,6 +34,7 @@ import {
 import { ru } from "date-fns/locale";
 import { Pattern, FilePreview } from "../types";
 import { translations, Lang } from "../services/i18n";
+import { CustomSelect } from "./CustomSelect";
 
 interface PostCreatorProps {
 	editingPostId: number | null;
@@ -65,6 +67,7 @@ interface PostCreatorProps {
 	onRemoveFile: (idx: number) => void;
 	onSetFullView: (url: string) => void;
 	onOpenBatchModal: () => void;
+	onOpenLivePreview: () => void;
 	onSetViewMode: (mode: "grid" | "carousel") => void;
 	onToggleComments: (v: boolean) => void;
 	onToggleNotify: (v: boolean) => void;
@@ -112,6 +115,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 	onRemoveFile,
 	onSetFullView,
 	onOpenBatchModal,
+	onOpenLivePreview,
 	onSetViewMode,
 	onToggleComments,
 	onToggleNotify,
@@ -176,64 +180,57 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 							{t.editMode}
 						</span>
 					) : (
-						/* Отдельная кнопка вызова пакетного режима */
-						<button
-							onClick={onOpenBatchModal}
-							className="flex items-center gap-1 text-[11px] font-semibold px-2.5 py-0.5 rounded-lg border hover:opacity-80 transition-all"
-							style={{
-								backgroundColor: "var(--bg-surface-sub)",
-								borderColor: "var(--border-light)",
-								color: "var(--accent)",
-							}}
-							title={t.batchTitle}
-						>
-							<Layers3 className="h-3.5 w-3.5" />
-							<span>{t.batchModeBtn}</span>
-						</button>
+						<div className="flex items-center gap-1.5">
+							<button
+								onClick={onOpenBatchModal}
+								className="p-1.5 rounded-lg border hover:opacity-80 transition-all cursor-pointer"
+								style={{
+									backgroundColor: "var(--bg-surface-sub)",
+									borderColor: "var(--border-light)",
+									color: "var(--accent)",
+								}}
+								title={t.batchTitle}
+							>
+								<Layers3 className="h-4 w-4" />
+							</button>
+
+							<button
+								onClick={onOpenLivePreview}
+								className="p-1.5 rounded-lg border hover:opacity-80 transition-all cursor-pointer"
+								style={{
+									backgroundColor: "var(--bg-surface-sub)",
+									borderColor: "var(--border-light)",
+									color: "var(--accent)",
+								}}
+								title={t.previewTitle}
+							>
+								<Eye className="h-4 w-4" />
+							</button>
+						</div>
 					)}
 				</div>
 
-				<div className="flex items-center gap-2">
-					<div
-						className="flex items-center gap-1.5 border rounded-lg px-2.5 py-1"
-						style={{
-							backgroundColor: "var(--bg-surface-sub)",
-							borderColor: "var(--border-light)",
-						}}
-					>
-						<Clock
-							className="h-3.5 w-3.5"
-							style={{ color: "var(--text-dim)" }}
-						/>
-						<select
-							className="bg-transparent text-xs focus:outline-none cursor-pointer"
-							style={{ color: "var(--text-app)" }}
-							value={selectedPatternId || ""}
-							onChange={(e) =>
-								onSelectPattern(Number(e.target.value))
-							}
-						>
-							{patterns.map((p) => (
-								<option
-									key={p.id}
-									value={p.id}
-									style={{
-										backgroundColor: "var(--bg-surface)",
-										color: "var(--text-app)",
-									}}
-								>
-									{p.name}{" "}
-									{p.interval_days > 1
-										? `(раз в ${p.interval_days} дн.)`
-										: ""}
-								</option>
-							))}
-						</select>
-					</div>
+				{/* Список паттернов без двойной рамки */}
+				<div className="flex items-center gap-1.5">
+					<CustomSelect
+						value={selectedPatternId || ""}
+						options={patterns.map((p) => ({
+							value: p.id,
+							label: `${p.name}${p.interval_days > 1 ? ` (раз в ${p.interval_days} дн.)` : ""}`,
+						}))}
+						onChange={(val) => onSelectPattern(Number(val))}
+						maxWidth="240px"
+						icon={
+							<Clock
+								className="h-3.5 w-3.5"
+								style={{ color: "var(--text-dim)" }}
+							/>
+						}
+					/>
 
 					<button
 						onClick={onOpenPatternModal}
-						className="p-1 rounded-lg border hover:opacity-80 transition-colors"
+						className="p-1.5 rounded-lg border hover:opacity-80 transition-colors cursor-pointer"
 						style={{
 							backgroundColor: "var(--bg-surface-sub)",
 							borderColor: "var(--border-light)",
@@ -269,7 +266,6 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 				</div>
 			</div>
 
-			{/* Обычный режим: строго до 10 файлов на один пост */}
 			<div className="flex-1 flex flex-col min-h-[140px] max-h-[220px] mb-2 flex-shrink-0">
 				{attachedFiles.length === 0 ? (
 					<div
@@ -342,7 +338,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 							<button
 								onClick={onSelectFiles}
 								disabled={attachedFiles.length >= 10}
-								className="flex items-center gap-1 text-[11px] font-medium disabled:opacity-40 hover:opacity-80 transition-opacity"
+								className="flex items-center gap-1 text-[11px] font-medium disabled:opacity-40 hover:opacity-80 transition-opacity cursor-pointer"
 								style={{ color: "var(--accent)" }}
 							>
 								<ImagePlus className="h-3.5 w-3.5" />
@@ -458,7 +454,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 			>
 				<button
 					onClick={onToggleSettings}
-					className="w-full flex items-center justify-between p-2.5 text-xs font-semibold hover:opacity-80 transition-opacity"
+					className="w-full flex items-center justify-between p-2.5 text-xs font-semibold hover:opacity-80 transition-opacity cursor-pointer"
 					style={{ color: "var(--text-app)" }}
 				>
 					<span>{t.pubSettings}</span>
@@ -498,7 +494,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 							>
 								<button
 									onClick={() => onSetViewMode("grid")}
-									className="flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold transition-all"
+									className="flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold transition-all cursor-pointer"
 									style={{
 										backgroundColor:
 											attachmentsViewMode === "grid"
@@ -510,12 +506,12 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 												: "var(--text-muted)",
 									}}
 								>
-									<LayoutGrid className="h-3 w-3" />
+									<LayoutGrid className="h-3.5 w-3.5" />
 									<span>{t.grid}</span>
 								</button>
 								<button
 									onClick={() => onSetViewMode("carousel")}
-									className="flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold transition-all"
+									className="flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold transition-all cursor-pointer"
 									style={{
 										backgroundColor:
 											attachmentsViewMode === "carousel"
@@ -527,7 +523,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 												: "var(--text-muted)",
 									}}
 								>
-									<SlidersHorizontal className="h-3 w-3" />
+									<SlidersHorizontal className="h-3.5 w-3.5" />
 									<span>{t.carousel}</span>
 								</button>
 							</div>
@@ -686,7 +682,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 							</span>
 							<button
 								onClick={onToggleCalendar}
-								className="flex items-center gap-2 border rounded-xl px-2.5 py-1 text-xs font-mono focus:outline-none transition-colors"
+								className="flex items-center gap-2 border rounded-xl px-2.5 py-1 text-xs font-mono focus:outline-none transition-colors cursor-pointer"
 								style={{
 									backgroundColor: "var(--bg-surface)",
 									borderColor: "var(--border-light)",
@@ -726,7 +722,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 												subMonths(viewMonth, 1),
 											)
 										}
-										className="p-1 rounded-lg border hover:opacity-80"
+										className="p-1 rounded-lg border hover:opacity-80 cursor-pointer"
 									>
 										<CL className="h-4 w-4" />
 									</button>
@@ -736,7 +732,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 												addMonths(viewMonth, 1),
 											)
 										}
-										className="p-1 rounded-lg border hover:opacity-80"
+										className="p-1 rounded-lg border hover:opacity-80 cursor-pointer"
 									>
 										<CR className="h-4 w-4" />
 									</button>
@@ -770,7 +766,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 											onClick={() =>
 												onSetSelectedDate(day)
 											}
-											className={`h-7 w-7 mx-auto rounded-lg flex items-center justify-center font-mono text-[11px] transition-colors ${
+											className={`h-7 w-7 mx-auto rounded-lg flex items-center justify-center font-mono text-[11px] transition-colors cursor-pointer ${
 												isSelected
 													? "shadow-md font-bold"
 													: isCurrentMonth
@@ -881,7 +877,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 							<div className="mt-3 flex justify-end">
 								<button
 									onClick={onToggleCalendar}
-									className="w-full py-1.5 rounded-xl text-xs font-semibold shadow-md transition-all active:scale-95"
+									className="w-full py-1.5 rounded-xl text-xs font-semibold shadow-md transition-all active:scale-95 cursor-pointer"
 									style={{
 										backgroundColor:
 											"var(--btn-primary-bg)",
@@ -904,7 +900,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 				{editingPostId && (
 					<button
 						onClick={onCancelEditing}
-						className="px-3.5 py-3 rounded-xl border font-semibold text-xs hover:opacity-80 transition-opacity"
+						className="px-3.5 py-3 rounded-xl border font-semibold text-xs hover:opacity-80 transition-opacity cursor-pointer"
 						style={{
 							backgroundColor: "var(--bg-surface-sub)",
 							borderColor: "var(--border-light)",
@@ -918,7 +914,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 				<button
 					onClick={onSavePost}
 					disabled={!selectedTargetId}
-					className="flex-1 flex items-center justify-center gap-2 rounded-xl py-3 text-xs sm:text-sm font-bold shadow-lg transition-all active:scale-[0.99] disabled:opacity-50 disabled:pointer-events-none"
+					className="flex-1 flex items-center justify-center gap-2 rounded-xl py-3 text-xs sm:text-sm font-bold shadow-lg transition-all active:scale-[0.99] disabled:opacity-50 disabled:pointer-events-none cursor-pointer"
 					style={{
 						backgroundColor: "var(--btn-primary-bg)",
 						color: "var(--btn-primary-text)",

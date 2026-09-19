@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { Account, Target } from "../types";
 import { translations, Lang } from "../services/i18n";
+import { CustomSelect } from "./CustomSelect";
 
 interface HeaderProps {
 	accounts: Account[];
@@ -71,6 +72,7 @@ export const Header: React.FC<HeaderProps> = ({
 					</span>
 				</div>
 
+				{/* Список токенов */}
 				<div className="flex items-center gap-2">
 					<span
 						className="text-xs font-medium"
@@ -80,28 +82,19 @@ export const Header: React.FC<HeaderProps> = ({
 					</span>
 					{accounts.length > 0 ? (
 						<div className="flex items-center gap-1.5">
-							<select
-								className="rounded-lg px-3 py-1.5 text-xs font-semibold border cursor-pointer max-w-[280px] truncate focus:outline-none"
-								style={{
-									backgroundColor: "var(--bg-surface-sub)",
-									color: "var(--text-app)",
-									borderColor: "var(--border-light)",
-								}}
+							<CustomSelect
 								value={activeAccountId || ""}
-								onChange={(e) =>
-									onSwitchAccount(Number(e.target.value))
-								}
-							>
-								{accounts.map((acc) => (
-									<option key={acc.id} value={acc.id}>
-										{acc.name}
-									</option>
-								))}
-							</select>
+								options={accounts.map((a) => ({
+									value: a.id,
+									label: a.name,
+								}))}
+								onChange={(val) => onSwitchAccount(Number(val))}
+								maxWidth="260px"
+							/>
 
 							<button
 								onClick={onDeleteAccount}
-								className="p-1.5 rounded-lg hover:opacity-75 transition-colors"
+								className="p-1.5 rounded-lg hover:opacity-75 transition-colors cursor-pointer"
 								style={{ color: "var(--text-dim)" }}
 								title={
 									lang === "ru"
@@ -123,7 +116,7 @@ export const Header: React.FC<HeaderProps> = ({
 
 					<button
 						onClick={onOpenTokenModal}
-						className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors hover:opacity-80"
+						className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors hover:opacity-80 cursor-pointer"
 						style={{
 							backgroundColor: "var(--bg-surface-sub)",
 							color: "var(--text-app)",
@@ -136,42 +129,32 @@ export const Header: React.FC<HeaderProps> = ({
 				</div>
 			</div>
 
-			<div className="flex items-center gap-3">
+			<div className="flex items-center gap-2.5">
+				{/* Список целей без двойной рамки */}
 				{targets.length > 1 && (
-					<div
-						className="flex items-center gap-2 rounded-lg px-2.5 py-1 border"
-						style={{
-							backgroundColor: "var(--bg-surface-sub)",
-							borderColor: "var(--border-light)",
-						}}
-					>
+					<div className="flex items-center gap-2">
 						<span
-							className="text-xs"
+							className="text-xs font-medium"
 							style={{ color: "var(--text-dim)" }}
 						>
 							{t.target}
 						</span>
-						<select
-							className="bg-transparent text-xs font-medium focus:outline-none cursor-pointer max-w-[220px] truncate"
-							style={{ color: "var(--text-app)" }}
+						<CustomSelect
 							value={selectedTargetId || ""}
-							onChange={(e) =>
-								onSelectTarget(Number(e.target.value))
-							}
-						>
-							{targets.map((tgt) => (
-								<option key={tgt.id} value={tgt.id}>
-									{tgt.title}
-								</option>
-							))}
-						</select>
+							options={targets.map((tgt) => ({
+								value: tgt.id,
+								label: tgt.title,
+							}))}
+							onChange={(val) => onSelectTarget(Number(val))}
+							maxWidth="220px"
+						/>
 					</div>
 				)}
 
-				{/* Кнопка открытия всех постов базы данных */}
+				{/* Иконка открытия всех постов */}
 				<button
 					onClick={onOpenAllPostsModal}
-					className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-semibold hover:opacity-80 transition-all"
+					className="p-2 rounded-xl border hover:opacity-80 transition-all cursor-pointer"
 					style={{
 						backgroundColor: "var(--bg-surface-sub)",
 						borderColor: "var(--border-light)",
@@ -180,15 +163,14 @@ export const Header: React.FC<HeaderProps> = ({
 					title={t.allPostsTab}
 				>
 					<Database
-						className="h-3.5 w-3.5"
+						className="h-4 w-4"
 						style={{ color: "var(--accent)" }}
 					/>
-					<span className="hidden md:inline">{t.allPostsTab}</span>
 				</button>
 
 				<button
 					onClick={onOpenSettings}
-					className="p-1.5 rounded-lg border transition-colors hover:opacity-80"
+					className="p-2 rounded-xl border hover:opacity-80 transition-all cursor-pointer"
 					style={{
 						backgroundColor: "var(--bg-surface-sub)",
 						borderColor: "var(--border-light)",
@@ -201,7 +183,7 @@ export const Header: React.FC<HeaderProps> = ({
 
 				<button
 					onClick={onToggleRightPanel}
-					className="p-1.5 rounded-lg border transition-colors hover:opacity-80"
+					className="p-2 rounded-xl border hover:opacity-80 transition-all cursor-pointer"
 					style={{
 						backgroundColor: "var(--bg-surface-sub)",
 						borderColor: "var(--border-light)",

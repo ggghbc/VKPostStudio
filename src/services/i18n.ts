@@ -57,6 +57,7 @@ export interface TranslationSchema {
 	statusError: string;
 	statusArchived: string;
 	statusPublished: string;
+	statusDeletedInVk: string;
 	noAttachments: string;
 	sendToVk: string;
 	sending: string;
@@ -78,6 +79,7 @@ export interface TranslationSchema {
 	themePink: string;
 	themeEarthy: string;
 	themeSteel: string;
+	themeTwilight: string;
 	langTitle: string;
 	backupDb: string;
 	cleanExpiredTokens: string;
@@ -105,6 +107,9 @@ export interface TranslationSchema {
 	confirmDelete: string;
 	cleanSuccess: string;
 	cleanExplain: string;
+	loadVkPhotos: string;
+	livePreview: string;
+	previewTitle: string;
 }
 
 export const translations: Record<Lang, TranslationSchema> = {
@@ -166,6 +171,7 @@ export const translations: Record<Lang, TranslationSchema> = {
 		statusError: "Ошибка",
 		statusArchived: "Архив",
 		statusPublished: "Опубликован в ВК",
+		statusDeletedInVk: "Удалён в ВК",
 		noAttachments: "Вложений нет",
 		sendToVk: "Отправить в ВК",
 		sending: "Отправка...",
@@ -189,6 +195,7 @@ export const translations: Record<Lang, TranslationSchema> = {
 		themePink: "Soft Pink Delight",
 		themeEarthy: "Earthy Green",
 		themeSteel: "Light Steel",
+		themeTwilight: "Golden Twilight",
 		langTitle: "Язык интерфейса",
 		backupDb: "Создать резервную копию базы данных",
 		cleanExpiredTokens: "Удалить недействительные токены",
@@ -217,6 +224,9 @@ export const translations: Record<Lang, TranslationSchema> = {
 		cleanSuccess: "Успешно удалено файлов:",
 		cleanExplain:
 			"Будут удалены исходные локальные файлы картинок с вашего диска только для тех постов, которые уже успешно находятся в отложке ВК. Превью в приложении сохранятся.",
+		loadVkPhotos: "Загрузить фото из ВК",
+		livePreview: "Предпросмотр",
+		previewTitle: "Предпросмотр поста на стене ВКонтакте",
 	},
 	en: {
 		appTitle: "VK Post Studio",
@@ -275,6 +285,7 @@ export const translations: Record<Lang, TranslationSchema> = {
 		statusError: "Error",
 		statusArchived: "Archived",
 		statusPublished: "Published in VK",
+		statusDeletedInVk: "Deleted in VK",
 		noAttachments: "No attachments",
 		sendToVk: "Send to VK",
 		sending: "Sending...",
@@ -297,6 +308,7 @@ export const translations: Record<Lang, TranslationSchema> = {
 		themePink: "Soft Pink Delight",
 		themeEarthy: "Earthy Green",
 		themeSteel: "Light Steel",
+		themeTwilight: "Golden Twilight",
 		langTitle: "Language",
 		backupDb: "Create database backup",
 		cleanExpiredTokens: "Delete invalid tokens",
@@ -325,5 +337,8 @@ export const translations: Record<Lang, TranslationSchema> = {
 		cleanSuccess: "Successfully freed files:",
 		cleanExplain:
 			"Original local image files will be removed from your disk only for posts already postponed to VK. Thumbnails in the app will be preserved.",
+		loadVkPhotos: "Download photos from VK",
+		livePreview: "Preview",
+		previewTitle: "VK Wall Post Live Preview",
 	},
 };

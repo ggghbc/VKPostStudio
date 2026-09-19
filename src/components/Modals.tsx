@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import {
 	format,
 	subMonths,
@@ -31,9 +31,18 @@ import {
 	Database,
 	AlertCircle,
 	Check,
+	ChevronUp,
+	ChevronDown,
+	DownloadCloud,
+	FileText,
+	Eye,
+	MoreHorizontal,
+	Heart,
+	MessageCircle,
+	Share2,
 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { PostItem, Theme, Pattern, Target } from "../types";
+import { PostItem, Theme, Pattern, Target, FilePreview } from "../types";
 import { translations, Lang } from "../services/i18n";
 
 export const SettingsModal: React.FC<{
@@ -84,6 +93,11 @@ export const SettingsModal: React.FC<{
 			label: t.themeSteel,
 			colors: ["#f8f9fa", "#dee2e6", "#adb5bd", "#495057", "#212529"],
 		},
+		{
+			id: "twilight",
+			label: t.themeTwilight,
+			colors: ["#000814", "#001d3d", "#003566", "#ffc300", "#ffd60a"],
+		},
 	];
 
 	return (
@@ -125,12 +139,12 @@ export const SettingsModal: React.FC<{
 						/>
 						<span>{t.themeTitle}</span>
 					</label>
-					<div className="flex flex-col gap-2">
+					<div className="flex flex-col gap-2 max-h-56 overflow-y-auto pr-1">
 						{themeOptions.map((th) => (
 							<button
 								key={th.id}
 								onClick={() => onSetTheme(th.id)}
-								className="flex items-center justify-between py-2.5 px-3 rounded-xl border text-xs font-semibold transition-all"
+								className="flex items-center justify-between py-2 px-3 rounded-xl border text-xs font-semibold transition-all cursor-pointer"
 								style={{
 									backgroundColor:
 										theme === th.id
@@ -180,7 +194,11 @@ export const SettingsModal: React.FC<{
 							<button
 								key={lg.id}
 								onClick={() => onSetLang(lg.id)}
-								className="py-2 px-3 rounded-xl border text-xs font-semibold transition-all"
+								className={`py-2 px-3 rounded-xl border text-xs font-semibold transition-all cursor-pointer ${
+									lang === lg.id
+										? "border-transparent"
+										: "hover:opacity-80"
+								}`}
 								style={{
 									backgroundColor:
 										lang === lg.id
@@ -208,7 +226,7 @@ export const SettingsModal: React.FC<{
 				>
 					<button
 						onClick={onBackupDb}
-						className="w-full flex items-center justify-between p-2.5 rounded-xl border text-xs font-medium hover:opacity-80 transition-all"
+						className="w-full flex items-center justify-between p-2.5 rounded-xl border text-xs font-medium hover:opacity-80 transition-all cursor-pointer"
 						style={{
 							backgroundColor: "var(--bg-surface-sub)",
 							borderColor: "var(--border-light)",
@@ -226,7 +244,7 @@ export const SettingsModal: React.FC<{
 
 					<button
 						onClick={onCleanExpiredTokens}
-						className="w-full flex items-center justify-between p-2.5 rounded-xl border text-xs font-medium text-rose-400 hover:bg-rose-500/10 border-rose-500/20 transition-all"
+						className="w-full flex items-center justify-between p-2.5 rounded-xl border text-xs font-medium text-rose-400 hover:bg-rose-500/10 border-rose-500/20 transition-all cursor-pointer"
 					>
 						<div className="flex items-center gap-2">
 							<ShieldAlert className="h-4 w-4" />
@@ -238,7 +256,7 @@ export const SettingsModal: React.FC<{
 				<div className="flex justify-end pt-2">
 					<button
 						onClick={onClose}
-						className="px-5 py-2 rounded-xl text-xs font-bold shadow-md transition-all active:scale-95"
+						className="px-5 py-2 rounded-xl text-xs font-bold shadow-md transition-all active:scale-95 cursor-pointer"
 						style={{
 							backgroundColor: "var(--btn-primary-bg)",
 							color: "var(--btn-primary-text)",
@@ -252,7 +270,281 @@ export const SettingsModal: React.FC<{
 	);
 };
 
-// Модальное окно подтверждения удаления с галочкой "Не спрашивать в текущей сессии"
+export const VkLivePreviewModal: React.FC<{
+	show: boolean;
+	lang: Lang;
+	targetTitle: string;
+	postText: string;
+	attachedFiles: FilePreview[];
+	viewMode: "grid" | "carousel";
+	authorsName: boolean;
+	adFromCreator: boolean;
+	commentsOnPost: boolean;
+	slotDisplay: string;
+	onClose: () => void;
+}> = ({
+	show,
+	lang,
+	targetTitle,
+	postText,
+	attachedFiles,
+	viewMode,
+	authorsName,
+	adFromCreator,
+	commentsOnPost,
+	slotDisplay,
+	onClose,
+}) => {
+	if (!show) return null;
+	const t = translations[lang];
+
+	const stats = useMemo(
+		() => ({
+			likes: Math.floor(Math.random() * 45) + 3,
+			comments: commentsOnPost ? Math.floor(Math.random() * 6) : 0,
+			shares: Math.floor(Math.random() * 8),
+			views: `${(Math.random() * 1.5 + 0.5).toFixed(1)}K`,
+		}),
+		[show, commentsOnPost],
+	);
+
+	return (
+		<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-150">
+			<div
+				className="border rounded-2xl w-full max-w-lg p-5 shadow-2xl space-y-3.5 max-h-[90vh] flex flex-col"
+				style={{
+					backgroundColor: "var(--bg-surface)",
+					borderColor: "var(--border-app)",
+				}}
+			>
+				<div
+					className="flex items-center justify-between pb-2 border-b"
+					style={{ borderColor: "var(--border-app)" }}
+				>
+					<div className="flex items-center gap-2">
+						<Eye
+							className="h-4 w-4"
+							style={{ color: "var(--accent)" }}
+						/>
+						<h3
+							className="font-semibold text-sm"
+							style={{ color: "var(--text-app)" }}
+						>
+							{t.previewTitle}
+						</h3>
+					</div>
+					<button
+						onClick={onClose}
+						className="hover:opacity-70"
+						style={{ color: "var(--text-muted)" }}
+					>
+						<X className="h-5 w-5" />
+					</button>
+				</div>
+
+				<div
+					className="border rounded-xl p-3.5 space-y-3 overflow-y-auto flex-1 shadow-inner"
+					style={{
+						backgroundColor: "var(--bg-surface-sub)",
+						borderColor: "var(--border-light)",
+					}}
+				>
+					<div className="flex items-center justify-between">
+						<div className="flex items-center gap-3">
+							<div
+								className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-xs shadow-sm flex-shrink-0"
+								style={{
+									backgroundColor: "var(--accent)",
+									color: "var(--btn-primary-text)",
+								}}
+							>
+								{targetTitle
+									? targetTitle.charAt(0).toUpperCase()
+									: "VK"}
+							</div>
+							<div className="flex flex-col min-w-0">
+								<span
+									className="font-bold text-xs truncate max-w-[220px]"
+									style={{ color: "var(--text-app)" }}
+								>
+									{targetTitle || "Сообщество"}
+								</span>
+								<span
+									className="text-[10px] font-medium opacity-70"
+									style={{ color: "var(--text-dim)" }}
+								>
+									{slotDisplay}
+								</span>
+							</div>
+						</div>
+
+						<div className="flex items-center gap-2">
+							<span
+								className="text-[10px] px-2 py-0.5 rounded-full border opacity-75"
+								style={{
+									backgroundColor: "var(--bg-surface)",
+									borderColor: "var(--border-light)",
+									color: "var(--text-dim)",
+								}}
+							>
+								Promote
+							</span>
+							<button
+								type="button"
+								className="p-1 opacity-60 hover:opacity-100 cursor-pointer"
+								style={{ color: "var(--text-dim)" }}
+							>
+								<MoreHorizontal className="h-4 w-4" />
+							</button>
+						</div>
+					</div>
+
+					{postText && (
+						<p
+							className="text-xs leading-relaxed whitespace-pre-wrap break-words px-1"
+							style={{ color: "var(--text-app)" }}
+						>
+							{postText}
+						</p>
+					)}
+
+					{attachedFiles.length > 0 && (
+						<div
+							className={`gap-1 rounded-xl overflow-hidden ${
+								viewMode === "carousel"
+									? "flex overflow-x-auto pb-1"
+									: attachedFiles.length === 1
+										? "grid grid-cols-1"
+										: attachedFiles.length === 2
+											? "grid grid-cols-2"
+											: "grid grid-cols-2 sm:grid-cols-3"
+							}`}
+						>
+							{attachedFiles.map((f, i) => (
+								<div
+									key={i}
+									className={`relative overflow-hidden rounded-lg ${viewMode === "carousel" ? "h-40 w-52 flex-shrink-0" : "h-36"}`}
+								>
+									{f.previewUrl ? (
+										<img
+											src={f.previewUrl}
+											alt=""
+											className="h-full w-full object-cover"
+										/>
+									) : (
+										<div
+											className="h-full w-full flex items-center justify-center border"
+											style={{
+												backgroundColor:
+													"var(--bg-surface)",
+											}}
+										>
+											<FileText
+												className="h-6 w-6"
+												style={{
+													color: "var(--accent)",
+												}}
+											/>
+										</div>
+									)}
+								</div>
+							))}
+						</div>
+					)}
+
+					<div
+						className="flex items-center justify-between text-[11px] px-1 font-medium"
+						style={{ color: "var(--text-dim)" }}
+					>
+						{authorsName && <span>Автор: Администратор</span>}
+						{adFromCreator && (
+							<span
+								className="px-2 py-0.5 rounded border text-[10px]"
+								style={{
+									backgroundColor: "var(--bg-surface)",
+									borderColor: "var(--border-light)",
+								}}
+							>
+								Реклама в сообществе
+							</span>
+						)}
+					</div>
+
+					<div
+						className="pt-2 border-t flex items-center justify-between text-xs select-none"
+						style={{ borderColor: "var(--border-light)" }}
+					>
+						<div className="flex items-center gap-2">
+							<div
+								className="flex items-center gap-1 px-2.5 py-1 rounded-full border cursor-pointer hover:opacity-85 transition-opacity"
+								style={{
+									backgroundColor: "var(--bg-surface)",
+									borderColor: "var(--border-light)",
+									color: "var(--text-app)",
+								}}
+							>
+								<Heart className="h-3.5 w-3.5" />
+								<span className="font-mono text-[11px] font-semibold">
+									{stats.likes}
+								</span>
+							</div>
+
+							<div
+								className="flex items-center gap-1 px-2.5 py-1 rounded-full border cursor-pointer hover:opacity-85 transition-opacity"
+								style={{
+									backgroundColor: "var(--bg-surface)",
+									borderColor: "var(--border-light)",
+									color: "var(--text-app)",
+								}}
+							>
+								<MessageCircle className="h-3.5 w-3.5" />
+								<span className="font-mono text-[11px] font-semibold">
+									{stats.comments}
+								</span>
+							</div>
+
+							<div
+								className="flex items-center gap-1 px-2.5 py-1 rounded-full border cursor-pointer hover:opacity-85 transition-opacity"
+								style={{
+									backgroundColor: "var(--bg-surface)",
+									borderColor: "var(--border-light)",
+									color: "var(--text-app)",
+								}}
+							>
+								<Share2 className="h-3.5 w-3.5" />
+								<span className="font-mono text-[11px] font-semibold">
+									{stats.shares}
+								</span>
+							</div>
+						</div>
+
+						<div
+							className="flex items-center gap-1 text-[11px]"
+							style={{ color: "var(--text-dim)" }}
+						>
+							<Eye className="h-3.5 w-3.5" />
+							<span className="font-mono">{stats.views}</span>
+						</div>
+					</div>
+				</div>
+
+				<div className="flex justify-end pt-1">
+					<button
+						onClick={onClose}
+						className="px-5 py-2 font-bold rounded-xl text-xs shadow-md transition-all active:scale-95 cursor-pointer"
+						style={{
+							backgroundColor: "var(--btn-primary-bg)",
+							color: "var(--btn-primary-text)",
+						}}
+					>
+						OK
+					</button>
+				</div>
+			</div>
+		</div>
+	);
+};
+
 export const DeleteConfirmModal: React.FC<{
 	show: boolean;
 	lang: Lang;
@@ -308,13 +600,13 @@ export const DeleteConfirmModal: React.FC<{
 				>
 					<button
 						onClick={onClose}
-						className="px-4 py-2 rounded-xl text-xs font-medium hover:opacity-70"
+						className="px-4 py-2 rounded-xl text-xs font-medium hover:opacity-70 cursor-pointer"
 					>
 						{t.cancel}
 					</button>
 					<button
 						onClick={() => onConfirm(dontAskAgain)}
-						className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold shadow-md transition-all active:scale-95"
+						className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold shadow-md transition-all active:scale-95 cursor-pointer"
 					>
 						{t.confirmDelete}
 					</button>
@@ -324,7 +616,6 @@ export const DeleteConfirmModal: React.FC<{
 	);
 };
 
-// Информативное модальное окно очистки файлов с диска
 export const CleanDiskModal: React.FC<{
 	show: boolean;
 	lang: Lang;
@@ -349,7 +640,10 @@ export const CleanDiskModal: React.FC<{
 					className="flex items-center justify-between pb-2 border-b"
 					style={{ borderColor: "var(--border-app)" }}
 				>
-					<div className="flex items-center gap-2 text-emerald-400">
+					<div
+						className="flex items-center gap-2"
+						style={{ color: "var(--accent)" }}
+					>
 						<HardDrive className="h-5 w-5" />
 						<h3
 							className="font-semibold text-sm"
@@ -358,14 +652,25 @@ export const CleanDiskModal: React.FC<{
 							{t.cleanDiskFiles}
 						</h3>
 					</div>
-					<button onClick={onClose} className="hover:opacity-70">
+					<button
+						onClick={onClose}
+						className="hover:opacity-70"
+						style={{ color: "var(--text-muted)" }}
+					>
 						<X className="h-5 w-5" />
 					</button>
 				</div>
 
 				{cleanedCount !== null ? (
 					<div className="space-y-4 py-2 text-center">
-						<div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-400 flex items-center justify-center gap-2">
+						<div
+							className="p-3 rounded-xl border text-xs flex items-center justify-center gap-2"
+							style={{
+								backgroundColor: "var(--bg-surface-sub)",
+								borderColor: "var(--border-light)",
+								color: "var(--accent)",
+							}}
+						>
 							<Check className="h-4 w-4" />
 							<span>
 								{t.cleanSuccess} <strong>{cleanedCount}</strong>
@@ -374,7 +679,7 @@ export const CleanDiskModal: React.FC<{
 						<div className="flex justify-center">
 							<button
 								onClick={onClose}
-								className="px-5 py-2 font-bold rounded-xl text-xs shadow-md transition-all active:scale-95"
+								className="px-5 py-2 font-bold rounded-xl text-xs shadow-md transition-all active:scale-95 cursor-pointer"
 								style={{
 									backgroundColor: "var(--btn-primary-bg)",
 									color: "var(--btn-primary-text)",
@@ -398,14 +703,14 @@ export const CleanDiskModal: React.FC<{
 						>
 							<button
 								onClick={onClose}
-								className="px-4 py-2 rounded-xl text-xs font-medium hover:opacity-70"
+								className="px-4 py-2 rounded-xl text-xs font-medium hover:opacity-70 cursor-pointer"
 							>
 								{t.cancel}
 							</button>
 							<button
 								onClick={onConfirmClean}
 								disabled={isCleaning}
-								className="px-4 py-2 font-bold rounded-xl text-xs shadow-md transition-all active:scale-95 disabled:opacity-50"
+								className="px-4 py-2 font-bold rounded-xl text-xs shadow-md transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
 								style={{
 									backgroundColor: "var(--btn-primary-bg)",
 									color: "var(--btn-primary-text)",
@@ -421,14 +726,23 @@ export const CleanDiskModal: React.FC<{
 	);
 };
 
-// Отдельное просторное окно для всех постов приложения
 export const AllPostsModal: React.FC<{
 	show: boolean;
 	lang: Lang;
 	posts: PostItem[];
 	onClose: () => void;
 	onDeletePost: (post: PostItem) => void;
-}> = ({ show, lang, posts, onClose, onDeletePost }) => {
+	onOpenFullImage: (url: string) => void;
+	onLoadVkPhotos: (post: PostItem) => void;
+}> = ({
+	show,
+	lang,
+	posts,
+	onClose,
+	onDeletePost,
+	onOpenFullImage,
+	onLoadVkPhotos,
+}) => {
 	if (!show) return null;
 	const t = translations[lang];
 
@@ -438,8 +752,16 @@ export const AllPostsModal: React.FC<{
 	const [groupByCriteria, setGroupByCriteria] = useState<
 		"none" | "target" | "status"
 	>("none");
+	const [filterTargetTitle, setFilterTargetTitle] = useState<string | null>(
+		null,
+	);
+	const [expandedIds, setExpandedIds] = useState<number[]>([]);
 
-	const sortedPosts = [...posts].sort((a, b) => {
+	const filteredPosts = filterTargetTitle
+		? posts.filter((p) => p.target_title === filterTargetTitle)
+		: posts;
+
+	const sortedPosts = [...filteredPosts].sort((a, b) => {
 		if (sortCriteria === "id_desc") return b.id - a.id;
 		if (sortCriteria === "id_asc") return a.id - b.id;
 		if (sortCriteria === "date_asc")
@@ -456,74 +778,214 @@ export const AllPostsModal: React.FC<{
 		return 0;
 	});
 
-	const renderCard = (post: PostItem) => (
-		<div
-			key={post.id}
-			className="p-3 rounded-xl border flex items-center justify-between gap-3 text-xs"
-			style={{
-				backgroundColor: "var(--bg-surface-sub)",
-				borderColor: "var(--border-light)",
-			}}
-		>
-			<div className="flex items-center gap-2.5 flex-1 min-w-0 flex-wrap">
-				<span className="font-mono font-bold text-[11px] opacity-60">
-					#{post.id}
-				</span>
-				{post.target_title && (
-					<span
-						className="text-[10px] px-2 py-0.5 rounded-md font-semibold border truncate max-w-[170px]"
+	const toggleExpand = (id: number) => {
+		setExpandedIds((prev) =>
+			prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+		);
+	};
+
+	const renderCard = (post: PostItem) => {
+		const isExpanded = expandedIds.includes(post.id);
+		const isVkPublished = post.status === "published";
+		const isDeletedInVk = post.status === "deleted_in_vk";
+
+		return (
+			<div
+				key={post.id}
+				className="rounded-xl border transition-colors overflow-hidden"
+				style={{
+					backgroundColor: "var(--bg-surface-sub)",
+					borderColor: "var(--border-light)",
+				}}
+			>
+				<div
+					onClick={() => toggleExpand(post.id)}
+					className="p-3 flex items-start justify-between gap-3 text-xs cursor-pointer select-none"
+				>
+					<div className="flex items-center gap-2.5 flex-1 min-w-0 flex-wrap">
+						<span className="font-mono font-bold text-[11px] opacity-60">
+							#{post.id}
+						</span>
+						{post.target_title && (
+							<button
+								type="button"
+								onClick={(e) => {
+									e.stopPropagation();
+									setFilterTargetTitle(
+										post.target_title || null,
+									);
+								}}
+								className="text-[10px] px-2 py-0.5 rounded-md font-semibold border truncate max-w-[170px] hover:opacity-80 transition-opacity cursor-pointer"
+								style={{
+									backgroundColor: "var(--bg-surface)",
+									borderColor: "var(--border-light)",
+									color: "var(--text-app)",
+								}}
+								title={
+									lang === "ru"
+										? `Показать только посты из ${post.target_title}`
+										: `Show only posts from ${post.target_title}`
+								}
+							>
+								{post.target_title}
+							</button>
+						)}
+						<span
+							className="font-mono font-semibold"
+							style={{ color: "var(--accent)" }}
+						>
+							{format(
+								new Date(post.scheduled_at_utc),
+								"dd/MM/yyyy HH:mm",
+							)}
+						</span>
+						<span
+							className="text-[10px] px-2 py-0.5 rounded border"
+							style={{ borderColor: "var(--border-light)" }}
+						>
+							{post.status === "queued"
+								? t.statusLocal
+								: post.status === "transferred_to_vk"
+									? t.statusVk
+									: isVkPublished
+										? t.statusPublished
+										: isDeletedInVk
+											? t.statusDeletedInVk
+											: t.statusError}
+						</span>
+						<span
+							className="text-xs truncate max-w-xs opacity-80"
+							style={{ color: "var(--text-app)" }}
+						>
+							{post.text || (
+								<em className="opacity-50">
+									{lang === "ru" ? "Без текста" : "No text"}
+								</em>
+							)}
+						</span>
+					</div>
+
+					<div className="flex items-center gap-1">
+						<button
+							onClick={(e) => {
+								e.stopPropagation();
+								onDeletePost(post);
+							}}
+							className="p-1.5 hover:text-rose-400 transition-colors cursor-pointer"
+							style={{ color: "var(--text-dim)" }}
+							title="Delete"
+						>
+							<Trash2 className="h-4 w-4" />
+						</button>
+						<div className="p-1 opacity-70">
+							{isExpanded ? (
+								<ChevronUp className="h-4 w-4" />
+							) : (
+								<ChevronDown className="h-4 w-4" />
+							)}
+						</div>
+					</div>
+				</div>
+
+				{isExpanded && (
+					<div
+						className="px-4 pb-4 pt-2 border-t space-y-3"
 						style={{
-							backgroundColor: "var(--bg-surface)",
 							borderColor: "var(--border-light)",
-							color: "var(--text-app)",
+							backgroundColor: "var(--bg-surface)",
 						}}
 					>
-						{post.target_title}
-					</span>
-				)}
-				<span
-					className="font-mono font-semibold"
-					style={{ color: "var(--accent)" }}
-				>
-					{format(
-						new Date(post.scheduled_at_utc),
-						"dd/MM/yyyy HH:mm",
-					)}
-				</span>
-				<span
-					className="text-[10px] px-2 py-0.5 rounded border"
-					style={{ borderColor: "var(--border-light)" }}
-				>
-					{post.status === "queued"
-						? t.statusLocal
-						: post.status === "transferred_to_vk"
-							? t.statusVk
-							: post.status === "archived"
-								? t.statusPublished
-								: t.statusError}
-				</span>
-				<span
-					className="text-xs truncate max-w-xs opacity-80"
-					style={{ color: "var(--text-app)" }}
-				>
-					{post.text || (
-						<em className="opacity-50">
-							{lang === "ru" ? "Без текста" : "No text"}
-						</em>
-					)}
-				</span>
-			</div>
+						{post.text && (
+							<p
+								className="text-xs leading-relaxed"
+								style={{ color: "var(--text-app)" }}
+							>
+								{post.text}
+							</p>
+						)}
 
-			<button
-				onClick={() => onDeletePost(post)}
-				className="p-1.5 hover:text-rose-400 transition-colors"
-				style={{ color: "var(--text-dim)" }}
-				title="Delete"
-			>
-				<Trash2 className="h-4 w-4" />
-			</button>
-		</div>
-	);
+						<div className="flex items-center gap-2 flex-wrap">
+							{isVkPublished && post.vk_post_id && (
+								<button
+									type="button"
+									onClick={() => onLoadVkPhotos(post)}
+									className="px-3 py-1.5 rounded-lg border text-xs font-semibold flex items-center gap-1.5 hover:opacity-80 transition-all cursor-pointer"
+									style={{
+										backgroundColor:
+											"var(--bg-surface-sub)",
+										borderColor: "var(--border-light)",
+										color: "var(--accent)",
+									}}
+								>
+									<DownloadCloud className="h-3.5 w-3.5" />
+									<span>{t.loadVkPhotos}</span>
+								</button>
+							)}
+						</div>
+
+						{post.attachments && post.attachments.length > 0 ? (
+							<div>
+								<span
+									className="text-[11px] font-semibold block mb-1.5"
+									style={{ color: "var(--text-dim)" }}
+								>
+									{t.attachedFiles} ({post.attachments.length}
+									):
+								</span>
+								<div className="grid grid-cols-4 gap-2">
+									{post.attachments.map((att, attIdx) => (
+										<div
+											key={attIdx}
+											onClick={() =>
+												att.thumb_data &&
+												onOpenFullImage(att.thumb_data)
+											}
+											className="h-20 rounded-lg border flex flex-col items-center justify-center overflow-hidden p-1 relative hover:border-[var(--accent)] transition-colors cursor-pointer"
+											style={{
+												backgroundColor:
+													"var(--bg-surface-sub)",
+												borderColor:
+													"var(--border-light)",
+											}}
+										>
+											{att.thumb_data ? (
+												<img
+													src={att.thumb_data}
+													alt={att.file_name}
+													className="h-full w-full object-cover rounded"
+												/>
+											) : (
+												<div className="flex flex-col items-center p-1 text-center">
+													<FileText
+														className="h-5 w-5 mb-1"
+														style={{
+															color: "var(--accent)",
+														}}
+													/>
+													<span
+														className="text-[9px] truncate max-w-full"
+														style={{
+															color: "var(--text-muted)",
+														}}
+													>
+														{att.file_name}
+													</span>
+												</div>
+											)}
+										</div>
+									))}
+								</div>
+							</div>
+						) : (
+							<span className="text-[11px] italic opacity-50 block">
+								{t.noAttachments}
+							</span>
+						)}
+					</div>
+				)}
+			</div>
+		);
+	};
 
 	return (
 		<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-150">
@@ -550,12 +1012,15 @@ export const AllPostsModal: React.FC<{
 							{t.allPostsTab} ({posts.length})
 						</h3>
 					</div>
-					<button onClick={onClose} className="hover:opacity-70">
+					<button
+						onClick={onClose}
+						className="hover:opacity-70"
+						style={{ color: "var(--text-muted)" }}
+					>
 						<X className="h-5 w-5" />
 					</button>
 				</div>
 
-				{/* Панель сортировки и фильтрации */}
 				<div
 					className="flex items-center justify-between gap-3 text-xs flex-wrap flex-shrink-0 p-2 rounded-xl border"
 					style={{
@@ -563,54 +1028,85 @@ export const AllPostsModal: React.FC<{
 						borderColor: "var(--border-light)",
 					}}
 				>
-					<div className="flex items-center gap-1.5">
-						<span style={{ color: "var(--text-dim)" }}>
-							{t.sortBy}
-						</span>
-						<select
-							value={sortCriteria}
-							onChange={(e) =>
-								setSortCriteria(e.target.value as any)
-							}
-							className="border rounded-lg px-2 py-1 text-xs focus:outline-none cursor-pointer"
-							style={{
-								backgroundColor: "var(--bg-surface)",
-								color: "var(--text-app)",
-								borderColor: "var(--border-light)",
-							}}
-						>
-							<option value="id_desc">{t.sortIdDesc}</option>
-							<option value="id_asc">{t.sortIdAsc}</option>
-							<option value="date_asc">{t.sortDateAsc}</option>
-							<option value="date_desc">{t.sortDateDesc}</option>
-							<option value="status">{t.sortStatus}</option>
-						</select>
+					<div className="flex items-center gap-3 flex-wrap">
+						<div className="flex items-center gap-1.5">
+							<span style={{ color: "var(--text-dim)" }}>
+								{t.sortBy}
+							</span>
+							<select
+								value={sortCriteria}
+								onChange={(e) =>
+									setSortCriteria(e.target.value as any)
+								}
+								className="border rounded-lg px-2 py-1 text-xs focus:outline-none cursor-pointer"
+								style={{
+									backgroundColor: "var(--bg-surface)",
+									color: "var(--text-app)",
+									borderColor: "var(--border-light)",
+								}}
+							>
+								<option value="id_desc">{t.sortIdDesc}</option>
+								<option value="id_asc">{t.sortIdAsc}</option>
+								<option value="date_asc">
+									{t.sortDateAsc}
+								</option>
+								<option value="date_desc">
+									{t.sortDateDesc}
+								</option>
+								<option value="status">{t.sortStatus}</option>
+							</select>
+						</div>
+
+						<div className="flex items-center gap-1.5">
+							<span style={{ color: "var(--text-dim)" }}>
+								{t.groupBy}
+							</span>
+							<select
+								value={groupByCriteria}
+								onChange={(e) =>
+									setGroupByCriteria(e.target.value as any)
+								}
+								className="border rounded-lg px-2 py-1 text-xs focus:outline-none cursor-pointer"
+								style={{
+									backgroundColor: "var(--bg-surface)",
+									color: "var(--text-app)",
+									borderColor: "var(--border-light)",
+								}}
+							>
+								<option value="none">{t.groupNone}</option>
+								<option value="target">
+									{t.groupByTarget}
+								</option>
+								<option value="status">
+									{t.groupByStatus}
+								</option>
+							</select>
+						</div>
 					</div>
 
-					<div className="flex items-center gap-1.5">
-						<span style={{ color: "var(--text-dim)" }}>
-							{t.groupBy}
-						</span>
-						<select
-							value={groupByCriteria}
-							onChange={(e) =>
-								setGroupByCriteria(e.target.value as any)
-							}
-							className="border rounded-lg px-2 py-1 text-xs focus:outline-none cursor-pointer"
+					{filterTargetTitle && (
+						<div
+							className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border font-semibold"
 							style={{
 								backgroundColor: "var(--bg-surface)",
-								color: "var(--text-app)",
-								borderColor: "var(--border-light)",
+								borderColor: "var(--accent)",
+								color: "var(--accent)",
 							}}
 						>
-							<option value="none">{t.groupNone}</option>
-							<option value="target">{t.groupByTarget}</option>
-							<option value="status">{t.groupByStatus}</option>
-						</select>
-					</div>
+							<span>
+								{t.targetLabel} {filterTargetTitle}
+							</span>
+							<button
+								type="button"
+								onClick={() => setFilterTargetTitle(null)}
+								className="p-0.5 hover:opacity-75 cursor-pointer"
+							>
+								<X className="h-3 w-3" />
+							</button>
+						</div>
+					)}
 				</div>
 
-				{/* Список постов с группировкой */}
 				<div className="flex-1 overflow-y-auto space-y-2.5 pr-1">
 					{sortedPosts.length === 0 ? (
 						<div className="text-center py-12 text-xs opacity-50">
@@ -630,9 +1126,12 @@ export const AllPostsModal: React.FC<{
 												: p.status ===
 													  "transferred_to_vk"
 													? t.statusVk
-													: p.status === "archived"
+													: p.status === "published"
 														? t.statusPublished
-														: t.statusError;
+														: p.status ===
+															  "deleted_in_vk"
+															? t.statusDeletedInVk
+															: t.statusError;
 									if (!acc[groupKey]) acc[groupKey] = [];
 									acc[groupKey].push(p);
 									return acc;
@@ -747,7 +1246,7 @@ export const TokenModal: React.FC<{
 					<div className="flex gap-2">
 						<button
 							onClick={onOpenBrowser}
-							className="flex-1 flex items-center justify-center gap-2 font-bold py-2.5 rounded-xl text-xs shadow-md transition-all active:scale-95"
+							className="flex-1 flex items-center justify-center gap-2 font-bold py-2.5 rounded-xl text-xs shadow-md transition-all active:scale-95 cursor-pointer"
 							style={{
 								backgroundColor: "var(--btn-primary-bg)",
 								color: "var(--btn-primary-text)",
@@ -763,7 +1262,7 @@ export const TokenModal: React.FC<{
 
 						<button
 							onClick={onPaste}
-							className="flex items-center gap-1.5 border px-3 py-2.5 rounded-xl text-xs font-medium hover:opacity-80 transition-opacity"
+							className="flex items-center gap-1.5 border px-3 py-2.5 rounded-xl text-xs font-medium hover:opacity-80 transition-opacity cursor-pointer"
 							style={{
 								backgroundColor: "var(--bg-surface-sub)",
 								borderColor: "var(--border-light)",
@@ -808,7 +1307,7 @@ export const TokenModal: React.FC<{
 					>
 						<button
 							onClick={onCleanExpired}
-							className="flex items-center gap-1.5 text-xs text-rose-400 hover:text-rose-300 font-medium py-1"
+							className="flex items-center gap-1.5 text-xs text-rose-400 hover:text-rose-300 font-medium py-1 cursor-pointer"
 						>
 							<ShieldAlert className="h-3.5 w-3.5" />
 							<span>{t.cleanExpiredTokens}</span>
@@ -819,7 +1318,7 @@ export const TokenModal: React.FC<{
 				<div className="mt-6 flex justify-end gap-3">
 					<button
 						onClick={onClose}
-						className="px-4 py-2 text-xs font-medium hover:opacity-70"
+						className="px-4 py-2 text-xs font-medium hover:opacity-70 cursor-pointer"
 						style={{ color: "var(--text-muted)" }}
 					>
 						{t.cancel}
@@ -827,7 +1326,7 @@ export const TokenModal: React.FC<{
 					<button
 						onClick={onSubmit}
 						disabled={isAdding || !tokenInput.trim()}
-						className="px-5 py-2 font-bold rounded-xl text-xs disabled:opacity-50 transition-all shadow-md active:scale-95"
+						className="px-5 py-2 font-bold rounded-xl text-xs disabled:opacity-50 transition-all shadow-md active:scale-95 cursor-pointer"
 						style={{
 							backgroundColor: "var(--btn-primary-bg)",
 							color: "var(--btn-primary-text)",
@@ -894,7 +1393,11 @@ export const PatternModal: React.FC<{
 					>
 						{t.createPatternTitle}
 					</h3>
-					<button onClick={onClose} className="hover:opacity-70">
+					<button
+						onClick={onClose}
+						className="hover:opacity-70"
+						style={{ color: "var(--text-muted)" }}
+					>
 						<X className="h-5 w-5" />
 					</button>
 				</div>
@@ -933,7 +1436,7 @@ export const PatternModal: React.FC<{
 								{patterns.length > 1 && (
 									<button
 										onClick={() => onDeletePattern(p.id)}
-										className="p-1 hover:text-rose-400 transition-colors"
+										className="p-1 hover:text-rose-400 transition-colors cursor-pointer"
 										title={
 											lang === "ru"
 												? "Удалить этот паттерн"
@@ -1026,13 +1529,14 @@ export const PatternModal: React.FC<{
 				<div className="mt-4 flex justify-end gap-3">
 					<button
 						onClick={onClose}
-						className="px-4 py-2 text-xs font-medium hover:opacity-70"
+						className="px-4 py-2 text-xs font-medium hover:opacity-70 cursor-pointer"
+						style={{ color: "var(--text-muted)" }}
 					>
 						{t.cancel}
 					</button>
 					<button
 						onClick={onSubmit}
-						className="px-4 py-2 font-bold rounded-xl text-xs shadow-md transition-all active:scale-95"
+						className="px-4 py-2 font-bold rounded-xl text-xs shadow-md transition-all active:scale-95 cursor-pointer"
 						style={{
 							backgroundColor: "var(--btn-primary-bg)",
 							color: "var(--btn-primary-text)",
@@ -1046,6 +1550,7 @@ export const PatternModal: React.FC<{
 	);
 };
 
+// 8. Пакетная генерация с прямой передачей состояния и поддержкой drag-and-drop
 export const BatchModal: React.FC<{
 	show: boolean;
 	lang: Lang;
@@ -1054,6 +1559,9 @@ export const BatchModal: React.FC<{
 	patterns: Pattern[];
 	selectedPatternId: number | null;
 	isCreating: boolean;
+	batchPaths: string[];
+	isDraggingOver: boolean;
+	onSetBatchPaths: React.Dispatch<React.SetStateAction<string[]>>;
 	onClose: () => void;
 	onSubmit: (params: {
 		targetId: number;
@@ -1070,13 +1578,15 @@ export const BatchModal: React.FC<{
 	patterns,
 	selectedPatternId,
 	isCreating,
+	batchPaths,
+	isDraggingOver,
+	onSetBatchPaths,
 	onClose,
 	onSubmit,
 }) => {
 	if (!show) return null;
 	const t = translations[lang];
 
-	const [batchPaths, setBatchPaths] = useState<string[]>([]);
 	const [chunkSize, setChunkSize] = useState<number>(1);
 	const [batchText, setBatchText] = useState("");
 	const [targetId, setTargetId] = useState<number>(
@@ -1098,7 +1608,7 @@ export const BatchModal: React.FC<{
 		});
 		if (res) {
 			const paths = Array.isArray(res) ? res : [res];
-			setBatchPaths((prev) => Array.from(new Set([...prev, ...paths])));
+			onSetBatchPaths((prev) => Array.from(new Set([...prev, ...paths])));
 		}
 	};
 
@@ -1147,17 +1657,28 @@ export const BatchModal: React.FC<{
 							{t.batchTitle}
 						</h3>
 					</div>
-					<button onClick={onClose} className="hover:opacity-70">
+					<button
+						onClick={onClose}
+						className="hover:opacity-70 cursor-pointer"
+						style={{ color: "var(--text-muted)" }}
+					>
 						<X className="h-5 w-5" />
 					</button>
 				</div>
 
+				{/* Интерактивная зона Drag-and-Drop в модальном окне */}
 				<div
 					onClick={handlePickBatchFiles}
-					className="border-2 border-dashed rounded-2xl p-6 text-center cursor-pointer hover:opacity-85 transition-all flex flex-col items-center justify-center"
+					onDragOver={(e) => e.preventDefault()}
+					onDragEnter={(e) => e.preventDefault()}
+					className={`border-2 border-dashed rounded-2xl p-6 text-center cursor-pointer transition-all flex flex-col items-center justify-center ${
+						isDraggingOver ? "scale-[0.99]" : "hover:opacity-85"
+					}`}
 					style={{
 						backgroundColor: "var(--bg-surface-sub)",
-						borderColor: "var(--border-light)",
+						borderColor: isDraggingOver
+							? "var(--accent)"
+							: "var(--border-light)",
 					}}
 				>
 					<UploadCloud
@@ -1185,8 +1706,8 @@ export const BatchModal: React.FC<{
 							<strong>{batchPaths.length}</strong>
 						</span>
 						<button
-							onClick={() => setBatchPaths([])}
-							className="text-[11px] hover:underline"
+							onClick={() => onSetBatchPaths([])}
+							className="text-[11px] hover:underline cursor-pointer"
 							style={{ color: "var(--accent)" }}
 						>
 							{lang === "ru" ? "Очистить список" : "Clear list"}
@@ -1231,7 +1752,7 @@ export const BatchModal: React.FC<{
 							<button
 								key={num}
 								onClick={() => setChunkSize(num)}
-								className="py-2 px-3 rounded-xl border text-xs font-semibold transition-all flex items-center justify-center gap-1.5"
+								className="py-2 px-3 rounded-xl border text-xs font-semibold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
 								style={{
 									backgroundColor:
 										chunkSize === num
@@ -1331,14 +1852,15 @@ export const BatchModal: React.FC<{
 				<div className="flex justify-end gap-2.5 pt-2">
 					<button
 						onClick={onClose}
-						className="px-4 py-2 rounded-xl text-xs font-medium hover:opacity-70"
+						className="px-4 py-2 rounded-xl text-xs font-medium hover:opacity-70 cursor-pointer"
+						style={{ color: "var(--text-muted)" }}
 					>
 						{t.cancel}
 					</button>
 					<button
 						onClick={handleCreate}
 						disabled={isCreating || batchPaths.length === 0}
-						className="px-5 py-2 font-bold rounded-xl text-xs shadow-md transition-all active:scale-95 disabled:opacity-50"
+						className="px-5 py-2 font-bold rounded-xl text-xs shadow-md transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
 						style={{
 							backgroundColor: "var(--btn-primary-bg)",
 							color: "var(--btn-primary-text)",
@@ -1384,7 +1906,11 @@ export const RevertModal: React.FC<{
 							{t.revertToLocal}
 						</h3>
 					</div>
-					<button onClick={onClose} className="hover:opacity-70">
+					<button
+						onClick={onClose}
+						className="hover:opacity-70 cursor-pointer"
+						style={{ color: "var(--text-muted)" }}
+					>
 						<X className="h-5 w-5" />
 					</button>
 				</div>
@@ -1399,7 +1925,7 @@ export const RevertModal: React.FC<{
 				<div className="space-y-2.5">
 					<button
 						onClick={() => onRevertSameTime(post.id)}
-						className="w-full flex items-center justify-between p-3 rounded-xl border text-xs font-semibold hover:opacity-80 transition-all text-left"
+						className="w-full flex items-center justify-between p-3 rounded-xl border text-xs font-semibold hover:opacity-80 transition-all text-left cursor-pointer"
 						style={{
 							backgroundColor: "var(--bg-surface-sub)",
 							borderColor: "var(--border-light)",
@@ -1419,7 +1945,7 @@ export const RevertModal: React.FC<{
 					</button>
 					<button
 						onClick={() => onRevertNextSlot(post.id)}
-						className="w-full flex items-center justify-between p-3 rounded-xl font-bold text-xs shadow-md text-left transition-all active:scale-95"
+						className="w-full flex items-center justify-between p-3 rounded-xl font-bold text-xs shadow-md text-left transition-all active:scale-95 cursor-pointer"
 						style={{
 							backgroundColor: "var(--btn-primary-bg)",
 							color: "var(--btn-primary-text)",
@@ -1431,7 +1957,8 @@ export const RevertModal: React.FC<{
 				<div className="mt-5 flex justify-end">
 					<button
 						onClick={onClose}
-						className="px-4 py-2 rounded-xl text-xs font-medium hover:opacity-70"
+						className="px-4 py-2 rounded-xl text-xs font-medium hover:opacity-70 cursor-pointer"
+						style={{ color: "var(--text-muted)" }}
 					>
 						{t.cancel}
 					</button>
@@ -1499,7 +2026,11 @@ export const RescheduleModal: React.FC<{
 							{t.selectPubTime}
 						</h3>
 					</div>
-					<button onClick={onClose} className="hover:opacity-70">
+					<button
+						onClick={onClose}
+						className="hover:opacity-70 cursor-pointer"
+						style={{ color: "var(--text-muted)" }}
+					>
 						<X className="h-5 w-5" />
 					</button>
 				</div>
@@ -1516,7 +2047,7 @@ export const RescheduleModal: React.FC<{
 							onClick={() =>
 								onViewMonthChange(subMonths(viewMonth, 1))
 							}
-							className="p-1 rounded-lg border hover:opacity-80"
+							className="p-1 rounded-lg border hover:opacity-80 cursor-pointer"
 						>
 							<ChevronLeft className="h-4 w-4" />
 						</button>
@@ -1524,7 +2055,7 @@ export const RescheduleModal: React.FC<{
 							onClick={() =>
 								onViewMonthChange(addMonths(viewMonth, 1))
 							}
-							className="p-1 rounded-lg border hover:opacity-80"
+							className="p-1 rounded-lg border hover:opacity-80 cursor-pointer"
 						>
 							<ChevronRight className="h-4 w-4" />
 						</button>
@@ -1553,7 +2084,7 @@ export const RescheduleModal: React.FC<{
 							<button
 								key={idx}
 								onClick={() => onDateSelect(day)}
-								className={`h-7 w-7 mx-auto rounded-lg flex items-center justify-center font-mono text-[11px] transition-colors ${
+								className={`h-7 w-7 mx-auto rounded-lg flex items-center justify-center font-mono text-[11px] transition-colors cursor-pointer ${
 									isSelected
 										? "shadow-md font-bold"
 										: isCurrentMonth
@@ -1632,13 +2163,14 @@ export const RescheduleModal: React.FC<{
 				<div className="mt-5 flex justify-end gap-2.5">
 					<button
 						onClick={onClose}
-						className="px-4 py-2 rounded-xl text-xs font-medium hover:opacity-70"
+						className="px-4 py-2 rounded-xl text-xs font-medium hover:opacity-70 cursor-pointer"
+						style={{ color: "var(--text-muted)" }}
 					>
 						{t.cancel}
 					</button>
 					<button
 						onClick={onSubmit}
-						className="px-4 py-2 font-bold rounded-xl text-xs shadow-md transition-all active:scale-95"
+						className="px-4 py-2 font-bold rounded-xl text-xs shadow-md transition-all active:scale-95 cursor-pointer"
 						style={{
 							backgroundColor: "var(--btn-primary-bg)",
 							color: "var(--btn-primary-text)",
@@ -1670,7 +2202,7 @@ export const LightboxModal: React.FC<{
 				/>
 				<button
 					onClick={onClose}
-					className="absolute -top-4 -right-4 p-2 rounded-full bg-slate-800 text-white hover:bg-rose-600 transition-colors shadow-lg"
+					className="absolute -top-4 -right-4 p-2 rounded-full bg-slate-800 text-white hover:bg-rose-600 transition-colors shadow-lg cursor-pointer"
 				>
 					<X className="h-5 w-5" />
 				</button>
