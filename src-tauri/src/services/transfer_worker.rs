@@ -9,12 +9,15 @@ use tauri::{AppHandle, Emitter};
 pub struct TransferWorker;
 
 fn format_vk_error(e_str: &str) -> String {
-    if e_str.contains("error 5") || e_str.contains("User authorization failed") || e_str.contains("another ip address") {
-        "Требуется обновление токена: срок действия истёк или не совпадает IP-адрес/VPN (VK API error 5). Откройте меню токенов и обновите токен.".to_string()
-    } else if e_str.contains("error 27") || e_str.contains("Group authorization failed") {
-        "VK API error 27: Требуется токен пользователя-администратора (User Token), а не токен сообщества.".to_string()
+    let clean = e_str.trim().trim_start_matches("Ошибка:").trim().trim_start_matches("Ошибка:").trim();
+    if clean.contains("error 5") || clean.contains("User authorization failed") {
+        "Требуется обновление токена: срок действия истёк или не совпадает IP-адрес/VPN (VK API error 5).".to_string()
+    } else if clean.contains("error 27") {
+        "VK API error 27: Требуется токен пользователя-администратора (User Token).".to_string()
+    } else if clean.contains("error sending request") {
+        "Сбой передачи файла на сервер ВК (ошибка сети/таймаут). Проверьте интернет-соединение.".to_string()
     } else {
-        format!("Ошибка: {}", e_str)
+        clean.to_string()
     }
 }
 
@@ -27,7 +30,6 @@ impl TransferWorker {
     ) -> Result<()> {
         let result = Self::process_posts(&app, &db, &vk, target_id).await;
 
-        // Гарантированно эмитим завершение трансфера, чтобы снять спиннер на фронтенде
         let _ = app.emit("transfer-finished", serde_json::json!({
             "success": result.is_ok(),
             "error": result.as_ref().err().map(|e| e.to_string())
@@ -83,13 +85,12 @@ impl TransferWorker {
 
             let scheduled_at = DateTime::parse_from_rfc3339(&sched_utc_str)
                 .map(|dt| dt.with_timezone(&Utc))
-                .map_err(|e| anyhow!("Неверный формат даты поста #{}: {}", post_id, e))?;
+                .map_err(|e| anyhow!("Неверный формат даты: {}", e))?;
 
             let now = Utc::now();
-            // ВКонтакте требует, чтобы дата отложки была в будущем минимум на 1–2 минуты
             if scheduled_at <= (now + chrono::Duration::seconds(60)) {
                 sqlx::query("UPDATE posts SET status = 'failed', error_message = ? WHERE id = ?")
-                    .bind("Время слота уже в прошлом или наступит менее чем через 2 минуты. Задайте новое время.")
+                    .bind("Время слота уже наступило или наступит менее чем через 1 минуту.")
                     .bind(post_id)
                     .execute(db)
                     .await?;
@@ -154,8 +155,7 @@ impl TransferWorker {
                             vk_attachment_strings.push(vk_string);
                         }
                         Err(e) => {
-                            let raw_err = e.to_string();
-                            let formatted = format_vk_error(&raw_err);
+                            let formatted = format_vk_error(&e.to_string());
 
                             sqlx::query("UPDATE attachments SET upload_status = 'error', error_message = ? WHERE id = ?")
                                 .bind(&formatted)
@@ -207,8 +207,7 @@ impl TransferWorker {
                     .await?;
                 }
                 Err(e) => {
-                    let raw_err = e.to_string();
-                    let formatted = format_vk_error(&raw_err);
+                    let formatted = format_vk_error(&e.to_string());
 
                     sqlx::query("UPDATE posts SET status = 'failed', error_message = ? WHERE id = ?")
                         .bind(&formatted)

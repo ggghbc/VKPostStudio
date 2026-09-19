@@ -47,13 +47,13 @@ export const Header: React.FC<HeaderProps> = ({
 
 	return (
 		<header
-			className="flex items-center justify-between px-6 py-3 border-b select-none transition-colors"
+			className="flex items-center justify-between px-5 py-2.5 border-b select-none transition-colors"
 			style={{
 				backgroundColor: "var(--bg-header)",
 				borderColor: "var(--border-app)",
 			}}
 		>
-			<div className="flex items-center gap-6">
+			<div className="flex items-center gap-5">
 				<div className="flex items-center gap-2.5">
 					<div
 						className="p-1.5 rounded-lg"
@@ -81,7 +81,7 @@ export const Header: React.FC<HeaderProps> = ({
 						{t.token}
 					</span>
 					{accounts.length > 0 ? (
-						<div className="flex items-center gap-1.5">
+						<div className="flex items-center gap-1">
 							<CustomSelect
 								value={activeAccountId || ""}
 								options={accounts.map((a) => ({
@@ -116,7 +116,7 @@ export const Header: React.FC<HeaderProps> = ({
 
 					<button
 						onClick={onOpenTokenModal}
-						className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors hover:opacity-80 cursor-pointer"
+						className="flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors hover:opacity-80 cursor-pointer"
 						style={{
 							backgroundColor: "var(--bg-surface-sub)",
 							color: "var(--text-app)",
@@ -130,9 +130,8 @@ export const Header: React.FC<HeaderProps> = ({
 			</div>
 
 			<div className="flex items-center gap-2.5">
-				{/* Список целей без двойной рамки */}
 				{targets.length > 1 && (
-					<div className="flex items-center gap-2">
+					<div className="flex items-center gap-1.5">
 						<span
 							className="text-xs font-medium"
 							style={{ color: "var(--text-dim)" }}
@@ -146,12 +145,11 @@ export const Header: React.FC<HeaderProps> = ({
 								label: tgt.title,
 							}))}
 							onChange={(val) => onSelectTarget(Number(val))}
-							maxWidth="220px"
+							maxWidth="230px"
 						/>
 					</div>
 				)}
 
-				{/* Иконка открытия всех постов */}
 				<button
 					onClick={onOpenAllPostsModal}
 					className="p-2 rounded-xl border hover:opacity-80 transition-all cursor-pointer"

@@ -83,6 +83,9 @@ export interface TranslationSchema {
 	langTitle: string;
 	backupDb: string;
 	cleanExpiredTokens: string;
+	deleteModeTitle: string;
+	deleteModeTrash: string;
+	deleteModePermanent: string;
 	batchTitle: string;
 	batchDropzone: string;
 	batchDropzoneSub: string;
@@ -199,6 +202,9 @@ export const translations: Record<Lang, TranslationSchema> = {
 		langTitle: "Язык интерфейса",
 		backupDb: "Создать резервную копию базы данных",
 		cleanExpiredTokens: "Удалить недействительные токены",
+		deleteModeTitle: "Очистка файлов с диска",
+		deleteModeTrash: "В корзину",
+		deleteModePermanent: "Безвозвратно",
 		batchTitle: "Пакетная генерация очереди",
 		batchDropzone: "Перетащите неограниченное число изображений",
 		batchDropzoneSub: "или нажмите для выбора сразу десятков файлов",
@@ -268,7 +274,7 @@ export const translations: Record<Lang, TranslationSchema> = {
 		noFreeSlots: "No available slots",
 		selectTarget: "Select target",
 		localQueue: "Local",
-		vkDelayed: "VK Postponed",
+		vkDelayed: "VK Scheduled",
 		history: "History",
 		allPostsTab: "All Posts",
 		emptyQueue: "Queue is empty",
@@ -281,7 +287,7 @@ export const translations: Record<Lang, TranslationSchema> = {
 		nextSlot: "Next slot",
 		setTime: "Set time",
 		statusLocal: "Local",
-		statusVk: "VK Postponed",
+		statusVk: "VK Scheduled",
 		statusError: "Error",
 		statusArchived: "Archived",
 		statusPublished: "Published in VK",
@@ -312,6 +318,9 @@ export const translations: Record<Lang, TranslationSchema> = {
 		langTitle: "Language",
 		backupDb: "Create database backup",
 		cleanExpiredTokens: "Delete invalid tokens",
+		deleteModeTitle: "Disk cleaning mode",
+		deleteModeTrash: "Move to Trash",
+		deleteModePermanent: "Delete permanently",
 		batchTitle: "Batch Queue Generator",
 		batchDropzone: "Drop unlimited images here",
 		batchDropzoneSub: "or click to select dozens of files",

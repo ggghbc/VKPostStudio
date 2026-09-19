@@ -108,3 +108,12 @@ pub async fn save_pasted_image_bytes(bytes: Vec<u8>, ext: String, app: AppHandle
 
     Ok(file_path.to_string_lossy().to_string())
 }
+
+#[tauri::command]
+pub async fn clear_database_except_tokens(state: State<'_, AppState>) -> Result<(), String> {
+    let mut tx = state.db.begin().await.map_err(|e| e.to_string())?;
+    sqlx::query("DELETE FROM attachments").execute(&mut *tx).await.map_err(|e| e.to_string())?;
+    sqlx::query("DELETE FROM posts").execute(&mut *tx).await.map_err(|e| e.to_string())?;
+    tx.commit().await.map_err(|e| e.to_string())?;
+    Ok(())
+}

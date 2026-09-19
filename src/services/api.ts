@@ -44,6 +44,8 @@ export const api = {
 	getHistory: (targetId: number) =>
 		invoke<PostItem[]>("get_post_history", { targetId }),
 	getAllPosts: () => invoke<PostItem[]>("get_all_posts"),
+	syncWallPosts: (targetId: number, offset: number) =>
+		invoke<number>("sync_vk_wall_posts", { targetId, offset }),
 	fetchVkPhotos: (targetId: number, vkPostId: number) =>
 		invoke<{ file_name: string; data_url: string }[]>(
 			"fetch_vk_post_photos",
@@ -54,8 +56,8 @@ export const api = {
 	addPost: (params: any) => invoke<number>("add_post_to_queue", params),
 	updatePost: (params: any) => invoke("update_post", params),
 	batchCreate: (params: any) => invoke<number>("batch_create_posts", params),
-	cleanLocalFiles: (targetId: number) =>
-		invoke<number>("clean_uploaded_local_files", { targetId }),
+	cleanLocalFiles: (targetId: number, toTrash: boolean) =>
+		invoke<number>("clean_uploaded_local_files", { targetId, toTrash }),
 
 	rescheduleNextSlot: (postId: number, patternId: number) =>
 		invoke<string>("reschedule_post_next_slot", { postId, patternId }),
@@ -75,4 +77,5 @@ export const api = {
 		invoke("delete_history_post", { postId }),
 	startTransfer: (targetId: number) =>
 		invoke("start_transfer_pipeline", { targetId }),
+	clearDatabaseExceptTokens: () => invoke("clear_database_except_tokens"),
 };

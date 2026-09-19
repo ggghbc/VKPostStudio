@@ -40,29 +40,96 @@ import {
 	Heart,
 	MessageCircle,
 	Share2,
+	Info,
+	RefreshCw,
 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { PostItem, Theme, Pattern, Target, FilePreview } from "../types";
 import { translations, Lang } from "../services/i18n";
+import { CustomSelect } from "./CustomSelect";
 
+// Внутреннее окно оповещений вместо системного alert
+export const NoticeModal: React.FC<{
+	show: boolean;
+	title: string;
+	message: string;
+	onClose: () => void;
+}> = ({ show, title, message, onClose }) => {
+	if (!show) return null;
+	return (
+		<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-[75] animate-in fade-in duration-150">
+			<div
+				className="border rounded-2xl w-full max-w-sm p-5 shadow-2xl space-y-4"
+				style={{
+					backgroundColor: "var(--bg-surface)",
+					borderColor: "var(--border-app)",
+				}}
+			>
+				<div className="flex items-center gap-2">
+					<Info
+						className="h-5 w-5"
+						style={{ color: "var(--accent)" }}
+					/>
+					<h3
+						className="font-semibold text-sm"
+						style={{ color: "var(--text-app)" }}
+					>
+						{title}
+					</h3>
+				</div>
+
+				<p
+					className="text-xs leading-relaxed"
+					style={{ color: "var(--text-muted)" }}
+				>
+					{message}
+				</p>
+
+				<div
+					className="flex justify-end pt-2 border-t"
+					style={{ borderColor: "var(--border-app)" }}
+				>
+					<button
+						onClick={onClose}
+						className="px-5 py-2 font-bold rounded-xl text-xs shadow-md transition-all active:scale-95 cursor-pointer"
+						style={{
+							backgroundColor: "var(--btn-primary-bg)",
+							color: "var(--btn-primary-text)",
+						}}
+					>
+						OK
+					</button>
+				</div>
+			</div>
+		</div>
+	);
+};
+
+// Окно настроек приложения с очисткой БД и выбором типа удаления
 export const SettingsModal: React.FC<{
 	show: boolean;
 	theme: Theme;
 	lang: Lang;
+	deleteMode: "permanent" | "trash";
 	onClose: () => void;
 	onSetTheme: (t: Theme) => void;
 	onSetLang: (l: Lang) => void;
+	onSetDeleteMode: (mode: "permanent" | "trash") => void;
 	onBackupDb: () => void;
 	onCleanExpiredTokens: () => void;
+	onClearDatabase: () => void;
 }> = ({
 	show,
 	theme,
 	lang,
+	deleteMode,
 	onClose,
 	onSetTheme,
 	onSetLang,
+	onSetDeleteMode,
 	onBackupDb,
 	onCleanExpiredTokens,
+	onClearDatabase,
 }) => {
 	if (!show) return null;
 	const t = translations[lang];
@@ -103,7 +170,7 @@ export const SettingsModal: React.FC<{
 	return (
 		<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-150">
 			<div
-				className="border rounded-2xl w-full max-w-md p-6 shadow-2xl space-y-5"
+				className="border rounded-2xl w-full max-w-md p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto"
 				style={{
 					backgroundColor: "var(--bg-surface)",
 					borderColor: "var(--border-app)",
@@ -121,13 +188,14 @@ export const SettingsModal: React.FC<{
 					</h3>
 					<button
 						onClick={onClose}
-						className="hover:opacity-70"
+						className="hover:opacity-70 cursor-pointer"
 						style={{ color: "var(--text-muted)" }}
 					>
 						<X className="h-5 w-5" />
 					</button>
 				</div>
 
+				{/* Тема оформления */}
 				<div className="space-y-2">
 					<label
 						className="flex items-center gap-2 text-xs font-semibold"
@@ -139,7 +207,7 @@ export const SettingsModal: React.FC<{
 						/>
 						<span>{t.themeTitle}</span>
 					</label>
-					<div className="flex flex-col gap-2 max-h-56 overflow-y-auto pr-1">
+					<div className="flex flex-col gap-2 max-h-48 overflow-y-auto pr-1">
 						{themeOptions.map((th) => (
 							<button
 								key={th.id}
@@ -175,6 +243,7 @@ export const SettingsModal: React.FC<{
 					</div>
 				</div>
 
+				{/* Язык интерфейса */}
 				<div className="space-y-2">
 					<label
 						className="flex items-center gap-2 text-xs font-semibold"
@@ -220,8 +289,58 @@ export const SettingsModal: React.FC<{
 					</div>
 				</div>
 
+				{/* Режим удаления файлов */}
+				<div className="space-y-2">
+					<label
+						className="flex items-center gap-2 text-xs font-semibold"
+						style={{ color: "var(--text-app)" }}
+					>
+						<Trash2
+							className="h-4 w-4"
+							style={{ color: "var(--accent)" }}
+						/>
+						<span>{t.deleteModeTitle}</span>
+					</label>
+					<div className="grid grid-cols-2 gap-2">
+						{[
+							{ id: "trash" as const, label: t.deleteModeTrash },
+							{
+								id: "permanent" as const,
+								label: t.deleteModePermanent,
+							},
+						].map((mode) => (
+							<button
+								key={mode.id}
+								onClick={() => onSetDeleteMode(mode.id)}
+								className={`py-2 px-3 rounded-xl border text-xs font-semibold transition-all cursor-pointer ${
+									deleteMode === mode.id
+										? "border-transparent"
+										: "hover:opacity-80"
+								}`}
+								style={{
+									backgroundColor:
+										deleteMode === mode.id
+											? "var(--btn-primary-bg)"
+											: "var(--bg-surface-sub)",
+									borderColor:
+										deleteMode === mode.id
+											? "var(--btn-primary-bg)"
+											: "var(--border-light)",
+									color:
+										deleteMode === mode.id
+											? "var(--btn-primary-text)"
+											: "var(--text-app)",
+								}}
+							>
+								{mode.label}
+							</button>
+						))}
+					</div>
+				</div>
+
+				{/* Сервисные действия */}
 				<div
-					className="pt-3 border-t space-y-2.5"
+					className="pt-2 border-t space-y-2"
 					style={{ borderColor: "var(--border-app)" }}
 				>
 					<button
@@ -251,9 +370,24 @@ export const SettingsModal: React.FC<{
 							<span>{t.cleanExpiredTokens}</span>
 						</div>
 					</button>
+
+					{/* Кнопка очистки базы данных */}
+					<button
+						onClick={onClearDatabase}
+						className="w-full flex items-center justify-between p-2.5 rounded-xl border text-xs font-medium text-rose-400 hover:bg-rose-500/10 border-rose-500/20 transition-all cursor-pointer"
+					>
+						<div className="flex items-center gap-2">
+							<Trash2 className="h-4 w-4" />
+							<span>
+								{lang === "ru"
+									? "Очистить базу данных (кроме токенов)"
+									: "Clear database (except tokens)"}
+							</span>
+						</div>
+					</button>
 				</div>
 
-				<div className="flex justify-end pt-2">
+				<div className="flex justify-end pt-1">
 					<button
 						onClick={onClose}
 						className="px-5 py-2 rounded-xl text-xs font-bold shadow-md transition-all active:scale-95 cursor-pointer"
@@ -335,7 +469,7 @@ export const VkLivePreviewModal: React.FC<{
 					</div>
 					<button
 						onClick={onClose}
-						className="hover:opacity-70"
+						className="hover:opacity-70 cursor-pointer"
 						style={{ color: "var(--text-muted)" }}
 					>
 						<X className="h-5 w-5" />
@@ -391,7 +525,7 @@ export const VkLivePreviewModal: React.FC<{
 							</span>
 							<button
 								type="button"
-								className="p-1 opacity-60 hover:opacity-100 cursor-pointer"
+								className="p-1 opacity-60 hover:opacity-100 cursor-default"
 								style={{ color: "var(--text-dim)" }}
 							>
 								<MoreHorizontal className="h-4 w-4" />
@@ -654,7 +788,7 @@ export const CleanDiskModal: React.FC<{
 					</div>
 					<button
 						onClick={onClose}
-						className="hover:opacity-70"
+						className="hover:opacity-70 cursor-pointer"
 						style={{ color: "var(--text-muted)" }}
 					>
 						<X className="h-5 w-5" />
@@ -726,29 +860,43 @@ export const CleanDiskModal: React.FC<{
 	);
 };
 
+// Меню "Все посты" с поддержкой дублированного выпадающего списка цели и кнопкой "Загрузить ещё"
 export const AllPostsModal: React.FC<{
 	show: boolean;
 	lang: Lang;
 	posts: PostItem[];
+	isSyncingWall: boolean;
+	targets: Target[];
+	selectedTargetId: number | null;
+	onSelectTarget: (id: number) => void;
 	onClose: () => void;
 	onDeletePost: (post: PostItem) => void;
 	onOpenFullImage: (url: string) => void;
 	onLoadVkPhotos: (post: PostItem) => void;
+	onSyncWallPosts: () => void;
+	onLoadMoreWallPosts: () => void;
 }> = ({
 	show,
 	lang,
 	posts,
+	isSyncingWall,
+	targets,
+	selectedTargetId,
+	onSelectTarget,
 	onClose,
 	onDeletePost,
 	onOpenFullImage,
 	onLoadVkPhotos,
+	onSyncWallPosts,
+	onLoadMoreWallPosts,
 }) => {
 	if (!show) return null;
 	const t = translations[lang];
 
+	// Сортировка по умолчанию: "По дате (позже)"
 	const [sortCriteria, setSortCriteria] = useState<
 		"id_desc" | "id_asc" | "date_asc" | "date_desc" | "status"
-	>("id_desc");
+	>("date_desc");
 	const [groupByCriteria, setGroupByCriteria] = useState<
 		"none" | "target" | "status"
 	>("none");
@@ -800,38 +948,49 @@ export const AllPostsModal: React.FC<{
 			>
 				<div
 					onClick={() => toggleExpand(post.id)}
-					className="p-3 flex items-start justify-between gap-3 text-xs cursor-pointer select-none"
+					className="p-2.5 flex items-center justify-between gap-2 text-xs cursor-pointer select-none"
 				>
-					<div className="flex items-center gap-2.5 flex-1 min-w-0 flex-wrap">
-						<span className="font-mono font-bold text-[11px] opacity-60">
-							#{post.id}
-						</span>
-						{post.target_title && (
-							<button
-								type="button"
-								onClick={(e) => {
-									e.stopPropagation();
-									setFilterTargetTitle(
-										post.target_title || null,
-									);
-								}}
-								className="text-[10px] px-2 py-0.5 rounded-md font-semibold border truncate max-w-[170px] hover:opacity-80 transition-opacity cursor-pointer"
+					<div className="flex items-center gap-2 flex-1 min-w-0 overflow-hidden">
+						{/* Номер показывается только для созданных в приложении постов */}
+						{post.is_app_created !== false ? (
+							<span className="font-mono font-bold text-[11px] opacity-60 w-8 text-right flex-shrink-0">
+								#{post.id}
+							</span>
+						) : (
+							<span
+								className="text-[10px] px-1.5 py-0.2 rounded border font-semibold opacity-80 w-8 text-center flex-shrink-0"
 								style={{
 									backgroundColor: "var(--bg-surface)",
 									borderColor: "var(--border-light)",
-									color: "var(--text-app)",
+									color: "var(--accent)",
 								}}
-								title={
-									lang === "ru"
-										? `Показать только посты из ${post.target_title}`
-										: `Show only posts from ${post.target_title}`
-								}
+								title="Пост обнаружен на стене ВКонтакте"
 							>
-								{post.target_title}
-							</button>
+								ВК
+							</span>
 						)}
+
+						{/* Цель (фиксированная ширина для ровного выравнивания колонок) */}
+						<button
+							type="button"
+							onClick={(e) => {
+								e.stopPropagation();
+								setFilterTargetTitle(post.target_title || null);
+							}}
+							className="text-[10px] px-2 py-0.5 rounded-md font-semibold border truncate w-[130px] text-center flex-shrink-0 hover:opacity-80 transition-opacity cursor-pointer"
+							style={{
+								backgroundColor: "var(--bg-surface)",
+								borderColor: "var(--border-light)",
+								color: "var(--text-app)",
+							}}
+							title={post.target_title || "Без цели"}
+						>
+							{post.target_title || "Без цели"}
+						</button>
+
+						{/* Дата и время (фиксированная ширина) */}
 						<span
-							className="font-mono font-semibold"
+							className="font-mono font-semibold w-[120px] text-center flex-shrink-0"
 							style={{ color: "var(--accent)" }}
 						>
 							{format(
@@ -839,9 +998,21 @@ export const AllPostsModal: React.FC<{
 								"dd/MM/yyyy HH:mm",
 							)}
 						</span>
+
+						{/* Статус публикации (фиксированная ширина) */}
 						<span
-							className="text-[10px] px-2 py-0.5 rounded border"
-							style={{ borderColor: "var(--border-light)" }}
+							className="text-[10px] px-2 py-0.5 rounded border w-[115px] text-center flex-shrink-0 truncate"
+							style={{
+								backgroundColor: isVkPublished
+									? "var(--accent-glow)"
+									: "var(--bg-surface)",
+								borderColor: isVkPublished
+									? "var(--accent)"
+									: "var(--border-light)",
+								color: isVkPublished
+									? "var(--accent)"
+									: "var(--text-app)",
+							}}
 						>
 							{post.status === "queued"
 								? t.statusLocal
@@ -853,8 +1024,10 @@ export const AllPostsModal: React.FC<{
 											? t.statusDeletedInVk
 											: t.statusError}
 						</span>
+
+						{/* Текст поста */}
 						<span
-							className="text-xs truncate max-w-xs opacity-80"
+							className="text-xs truncate flex-1 min-w-0 opacity-80 pl-2"
 							style={{ color: "var(--text-app)" }}
 						>
 							{post.text || (
@@ -865,18 +1038,22 @@ export const AllPostsModal: React.FC<{
 						</span>
 					</div>
 
-					<div className="flex items-center gap-1">
-						<button
-							onClick={(e) => {
-								e.stopPropagation();
-								onDeletePost(post);
-							}}
-							className="p-1.5 hover:text-rose-400 transition-colors cursor-pointer"
-							style={{ color: "var(--text-dim)" }}
-							title="Delete"
-						>
-							<Trash2 className="h-4 w-4" />
-						</button>
+					<div className="flex items-center gap-1 flex-shrink-0">
+						{/* Кнопка удаления скрыта для уже опубликованных постов */}
+						{!isVkPublished && (
+							<button
+								onClick={(e) => {
+									e.stopPropagation();
+									onDeletePost(post);
+								}}
+								className="p-1.5 hover:text-rose-400 transition-colors cursor-pointer"
+								style={{ color: "var(--text-dim)" }}
+								title="Delete"
+							>
+								<Trash2 className="h-4 w-4" />
+							</button>
+						)}
+
 						<div className="p-1 opacity-70">
 							{isExpanded ? (
 								<ChevronUp className="h-4 w-4" />
@@ -887,6 +1064,7 @@ export const AllPostsModal: React.FC<{
 					</div>
 				</div>
 
+				{/* Раскрывающийся подробный блок */}
 				{isExpanded && (
 					<div
 						className="px-4 pb-4 pt-2 border-t space-y-3"
@@ -905,7 +1083,7 @@ export const AllPostsModal: React.FC<{
 						)}
 
 						<div className="flex items-center gap-2 flex-wrap">
-							{isVkPublished && post.vk_post_id && (
+							{post.vk_post_id && (
 								<button
 									type="button"
 									onClick={() => onLoadVkPhotos(post)}
@@ -1012,15 +1190,63 @@ export const AllPostsModal: React.FC<{
 							{t.allPostsTab} ({posts.length})
 						</h3>
 					</div>
-					<button
-						onClick={onClose}
-						className="hover:opacity-70"
-						style={{ color: "var(--text-muted)" }}
-					>
-						<X className="h-5 w-5" />
-					</button>
+
+					<div className="flex items-center gap-2">
+						{/* Кнопка первого сканирования */}
+						<button
+							onClick={onSyncWallPosts}
+							disabled={isSyncingWall}
+							className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-semibold hover:opacity-80 transition-all cursor-pointer disabled:opacity-50"
+							style={{
+								backgroundColor: "var(--bg-surface-sub)",
+								borderColor: "var(--border-light)",
+								color: "var(--accent)",
+							}}
+							title="Загрузить свежие посты со стены выбранного сообщества"
+						>
+							<DownloadCloud
+								className={`h-3.5 w-3.5 ${isSyncingWall ? "animate-spin" : ""}`}
+							/>
+							<span>
+								{isSyncingWall
+									? "..."
+									: lang === "ru"
+										? "Сканировать стену ВК"
+										: "Sync Wall"}
+							</span>
+						</button>
+
+						{/* Кнопка пагинации (Загрузить ещё) */}
+						<button
+							onClick={onLoadMoreWallPosts}
+							disabled={isSyncingWall}
+							className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-semibold hover:opacity-80 transition-all cursor-pointer disabled:opacity-50"
+							style={{
+								backgroundColor: "var(--bg-surface-sub)",
+								borderColor: "var(--border-light)",
+								color: "var(--text-app)",
+							}}
+							title="Загрузить следующую порцию старых постов"
+						>
+							<RefreshCw
+								className={`h-3.5 w-3.5 ${isSyncingWall ? "animate-spin" : ""}`}
+							/>
+							<span>
+								{lang === "ru" ? "Загрузить ещё" : "Load More"}
+							</span>
+						</button>
+
+						<button
+							onClick={onClose}
+							className="hover:opacity-70 cursor-pointer"
+							style={{ color: "var(--text-muted)" }}
+						>
+							<X className="h-5 w-5" />
+						</button>
+					</div>
 				</div>
 
+				{/* Панель фильтров на CustomSelect с дублированием выбора цели */}
 				<div
 					className="flex items-center justify-between gap-3 text-xs flex-wrap flex-shrink-0 p-2 rounded-xl border"
 					style={{
@@ -1029,58 +1255,61 @@ export const AllPostsModal: React.FC<{
 					}}
 				>
 					<div className="flex items-center gap-3 flex-wrap">
+						{/* Продублированный селектор цели */}
+						{targets.length > 1 && (
+							<div className="flex items-center gap-1.5">
+								<span style={{ color: "var(--text-dim)" }}>
+									{t.target}:
+								</span>
+								<CustomSelect
+									value={selectedTargetId || ""}
+									options={targets.map((tgt) => ({
+										value: tgt.id,
+										label: tgt.title,
+									}))}
+									onChange={(val) =>
+										onSelectTarget(Number(val))
+									}
+									maxWidth="180px"
+								/>
+							</div>
+						)}
+
 						<div className="flex items-center gap-1.5">
 							<span style={{ color: "var(--text-dim)" }}>
 								{t.sortBy}
 							</span>
-							<select
+							<CustomSelect
 								value={sortCriteria}
-								onChange={(e) =>
-									setSortCriteria(e.target.value as any)
-								}
-								className="border rounded-lg px-2 py-1 text-xs focus:outline-none cursor-pointer"
-								style={{
-									backgroundColor: "var(--bg-surface)",
-									color: "var(--text-app)",
-									borderColor: "var(--border-light)",
-								}}
-							>
-								<option value="id_desc">{t.sortIdDesc}</option>
-								<option value="id_asc">{t.sortIdAsc}</option>
-								<option value="date_asc">
-									{t.sortDateAsc}
-								</option>
-								<option value="date_desc">
-									{t.sortDateDesc}
-								</option>
-								<option value="status">{t.sortStatus}</option>
-							</select>
+								options={[
+									{
+										value: "date_desc",
+										label: t.sortDateDesc,
+									},
+									{ value: "date_asc", label: t.sortDateAsc },
+									{ value: "id_desc", label: t.sortIdDesc },
+									{ value: "id_asc", label: t.sortIdAsc },
+									{ value: "status", label: t.sortStatus },
+								]}
+								onChange={(val) => setSortCriteria(val)}
+								maxWidth="160px"
+							/>
 						</div>
 
 						<div className="flex items-center gap-1.5">
 							<span style={{ color: "var(--text-dim)" }}>
 								{t.groupBy}
 							</span>
-							<select
+							<CustomSelect
 								value={groupByCriteria}
-								onChange={(e) =>
-									setGroupByCriteria(e.target.value as any)
-								}
-								className="border rounded-lg px-2 py-1 text-xs focus:outline-none cursor-pointer"
-								style={{
-									backgroundColor: "var(--bg-surface)",
-									color: "var(--text-app)",
-									borderColor: "var(--border-light)",
-								}}
-							>
-								<option value="none">{t.groupNone}</option>
-								<option value="target">
-									{t.groupByTarget}
-								</option>
-								<option value="status">
-									{t.groupByStatus}
-								</option>
-							</select>
+								options={[
+									{ value: "none", label: t.groupNone },
+									{ value: "target", label: t.groupByTarget },
+									{ value: "status", label: t.groupByStatus },
+								]}
+								onChange={(val) => setGroupByCriteria(val)}
+								maxWidth="160px"
+							/>
 						</div>
 					</div>
 
@@ -1211,7 +1440,7 @@ export const TokenModal: React.FC<{
 					</div>
 					<button
 						onClick={onClose}
-						className="hover:opacity-70"
+						className="hover:opacity-70 cursor-pointer"
 						style={{ color: "var(--text-muted)" }}
 					>
 						<X className="h-5 w-5" />
@@ -1395,7 +1624,7 @@ export const PatternModal: React.FC<{
 					</h3>
 					<button
 						onClick={onClose}
-						className="hover:opacity-70"
+						className="hover:opacity-70 cursor-pointer"
 						style={{ color: "var(--text-muted)" }}
 					>
 						<X className="h-5 w-5" />
@@ -1550,7 +1779,6 @@ export const PatternModal: React.FC<{
 	);
 };
 
-// 8. Пакетная генерация с прямой передачей состояния и поддержкой drag-and-drop
 export const BatchModal: React.FC<{
 	show: boolean;
 	lang: Lang;
@@ -1613,16 +1841,8 @@ export const BatchModal: React.FC<{
 	};
 
 	const handleCreate = () => {
-		if (batchPaths.length === 0)
-			return alert(
-				lang === "ru" ? "Выберите изображения" : "Select images",
-			);
-		if (!targetId || !patternId)
-			return alert(
-				lang === "ru"
-					? "Выберите цель и расписание"
-					: "Select target & pattern",
-			);
+		if (batchPaths.length === 0) return;
+		if (!targetId || !patternId) return;
 		onSubmit({
 			targetId,
 			patternId,
@@ -1666,7 +1886,6 @@ export const BatchModal: React.FC<{
 					</button>
 				</div>
 
-				{/* Интерактивная зона Drag-and-Drop в модальном окне */}
 				<div
 					onClick={handlePickBatchFiles}
 					onDragOver={(e) => e.preventDefault()}
@@ -1790,6 +2009,7 @@ export const BatchModal: React.FC<{
 					)}
 				</div>
 
+				{/* Списки цели и паттерна раскрываются вверх (dropUp) */}
 				<div
 					className="grid grid-cols-2 gap-3 pt-2 border-t"
 					style={{ borderColor: "var(--border-app)" }}
@@ -1801,24 +2021,16 @@ export const BatchModal: React.FC<{
 						>
 							{t.targetLabel}
 						</label>
-						<select
+						<CustomSelect
 							value={targetId}
-							onChange={(e) =>
-								setTargetId(Number(e.target.value))
-							}
-							className="w-full border rounded-xl p-2 text-xs focus:outline-none cursor-pointer truncate"
-							style={{
-								backgroundColor: "var(--bg-surface-sub)",
-								color: "var(--text-app)",
-								borderColor: "var(--border-light)",
-							}}
-						>
-							{targets.map((tgt) => (
-								<option key={tgt.id} value={tgt.id}>
-									{tgt.title}
-								</option>
-							))}
-						</select>
+							options={targets.map((tgt) => ({
+								value: tgt.id,
+								label: tgt.title,
+							}))}
+							onChange={(val) => setTargetId(Number(val))}
+							maxWidth="100%"
+							dropUp={true}
+						/>
 					</div>
 
 					<div>
@@ -1828,24 +2040,16 @@ export const BatchModal: React.FC<{
 						>
 							{lang === "ru" ? "Расписание:" : "Pattern:"}
 						</label>
-						<select
+						<CustomSelect
 							value={patternId}
-							onChange={(e) =>
-								setPatternId(Number(e.target.value))
-							}
-							className="w-full border rounded-xl p-2 text-xs focus:outline-none cursor-pointer truncate"
-							style={{
-								backgroundColor: "var(--bg-surface-sub)",
-								color: "var(--text-app)",
-								borderColor: "var(--border-light)",
-							}}
-						>
-							{patterns.map((p) => (
-								<option key={p.id} value={p.id}>
-									{p.name}
-								</option>
-							))}
-						</select>
+							options={patterns.map((p) => ({
+								value: p.id,
+								label: p.name,
+							}))}
+							onChange={(val) => setPatternId(Number(val))}
+							maxWidth="100%"
+							dropUp={true}
+						/>
 					</div>
 				</div>
 

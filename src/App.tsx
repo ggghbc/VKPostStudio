@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
+import { X, FileText } from "lucide-react";
 import { Header } from "./components/Header";
 import { PostCreator } from "./components/PostCreator";
 import { QueuePanel } from "./components/QueuePanel";
@@ -16,6 +17,7 @@ import {
 	DeleteConfirmModal,
 	CleanDiskModal,
 	VkLivePreviewModal,
+	NoticeModal,
 } from "./components/Modals";
 import { api } from "./services/api";
 import {
@@ -36,6 +38,12 @@ export default function App() {
 	const [lang, setLang] = useState<Lang>(
 		() => (localStorage.getItem("vk_lang") as Lang) || "ru",
 	);
+	const [deleteMode, setDeleteMode] = useState<"permanent" | "trash">(() => {
+		return (
+			(localStorage.getItem("vk_delete_mode") as "permanent" | "trash") ||
+			"trash"
+		);
+	});
 
 	const [accounts, setAccounts] = useState<Account[]>([]);
 	const [activeAccountId, setActiveAccountId] = useState<number | null>(
@@ -70,6 +78,8 @@ export default function App() {
 	const [expandedPostIds, setExpandedPostIds] = useState<number[]>([]);
 	const [nextSlotDisplay, setNextSlotDisplay] = useState<string>("Расчет...");
 	const [isSyncingVk, setIsSyncingVk] = useState(false);
+	const [isSyncingWall, setIsSyncingWall] = useState(false);
+	const [wallOffset, setWallOffset] = useState<number>(0);
 	const [isRightPanelOpen, setIsRightPanelOpen] = useState(true);
 
 	const [editingPostId, setEditingPostId] = useState<number | null>(null);
@@ -118,6 +128,15 @@ export default function App() {
 	const [isBatchCreating, setIsBatchCreating] = useState(false);
 
 	const [showLivePreviewModal, setShowLivePreviewModal] = useState(false);
+
+	// Просмотр поста из календаря
+	const [calendarDetailPost, setCalendarDetailPost] =
+		useState<PostItem | null>(null);
+
+	const [notice, setNotice] = useState<{
+		title: string;
+		message: string;
+	} | null>(null);
 
 	const [skipDeleteConfirmSession, setSkipDeleteConfirmSession] =
 		useState(false);
@@ -216,22 +235,40 @@ export default function App() {
 	}, []);
 
 	const handleCleanExpiredTokens = async () => {
+		try {
+			const deleted = await api.cleanExpiredTokens();
+			setNotice({
+				title: lang === "ru" ? "Очистка токенов" : "Tokens Cleaned",
+				message: `${lang === "ru" ? "Удалено недействительных токенов:" : "Removed invalid tokens:"} ${deleted}`,
+			});
+			loadAccounts();
+		} catch (e) {
+			setNotice({ title: "Ошибка", message: String(e) });
+		}
+	};
+
+	const handleClearDatabase = async () => {
 		if (
 			!confirm(
 				lang === "ru"
-					? "Проверить все токены и удалить просроченные?"
-					: "Check all tokens and delete expired ones?",
+					? "Вы уверены? Будут удалены все локальные очереди, посты и история. Токены останутся."
+					: "Are you sure? All posts and queues will be deleted. Tokens will remain.",
 			)
 		)
 			return;
 		try {
-			const deleted = await api.cleanExpiredTokens();
-			alert(
-				`${lang === "ru" ? "Удалено недействительных токенов:" : "Removed invalid tokens:"} ${deleted}`,
-			);
-			loadAccounts();
+			await api.clearDatabaseExceptTokens();
+			if (selectedTargetId) syncVkQueue(selectedTargetId);
+			setNotice({
+				title:
+					lang === "ru" ? "База данных очищена" : "Database Cleared",
+				message:
+					lang === "ru"
+						? "Все посты и очереди успешно удалены."
+						: "All posts and queues have been cleared.",
+			});
 		} catch (e) {
-			alert("Error: " + e);
+			setNotice({ title: "Ошибка", message: String(e) });
 		}
 	};
 
@@ -274,7 +311,6 @@ export default function App() {
 		return () => window.removeEventListener("paste", handleWindowPaste);
 	}, []);
 
-	// Перехват системного drag-and-drop: разделение между окном пакетного постинга и обычным конструктором
 	useEffect(() => {
 		let isCancelled = false;
 		let unDrop: (() => void) | undefined;
@@ -293,7 +329,6 @@ export default function App() {
 				const rawPaths: string[] = event.payload?.paths || [];
 				if (rawPaths.length === 0) return;
 
-				// Если открыто модальное окно пакетной генерации — направляем файлы строго в него
 				if (showBatchModalRef.current) {
 					setBatchPaths((prev) =>
 						Array.from(new Set([...prev, ...rawPaths])),
@@ -346,7 +381,10 @@ export default function App() {
 				syncVkQueue(selectedTargetId);
 			}
 			if (event.payload?.error) {
-				alert(event.payload.error);
+				setNotice({
+					title: "Ошибка отправки",
+					message: String(event.payload.error),
+				});
 			}
 		}).then((f) => {
 			unFinish = f;
@@ -514,12 +552,35 @@ export default function App() {
 		}
 	};
 
+	const handleSyncWallPosts = async (
+		targetId: number,
+		isLoadMore: boolean = false,
+	) => {
+		setIsSyncingWall(true);
+		const nextOffset = isLoadMore ? wallOffset + 30 : 0;
+		try {
+			const count = await api.syncWallPosts(targetId, nextOffset);
+			setWallOffset(nextOffset);
+			await loadHistory(targetId);
+			await loadAllPosts();
+			setNotice({
+				title: lang === "ru" ? "Стена сообщества" : "Community Wall",
+				message: `${lang === "ru" ? "Загружено постов со стены:" : "Posts synced from wall:"} ${count}`,
+			});
+		} catch (e) {
+			setNotice({ title: "Ошибка", message: String(e) });
+		} finally {
+			setIsSyncingWall(false);
+		}
+	};
+
 	useEffect(() => {
 		if (selectedTargetId) {
 			localStorage.setItem(
 				"vk_selected_target",
 				selectedTargetId.toString(),
 			);
+			setWallOffset(0);
 			syncVkQueue(selectedTargetId);
 		}
 	}, [selectedTargetId]);
@@ -568,16 +629,24 @@ export default function App() {
 	};
 
 	const handleSavePost = async () => {
-		if (!postText.trim() && attachedFiles.length === 0)
-			return alert(
-				lang === "ru"
-					? "Добавьте текст или медиафайл"
-					: "Add text or media",
-			);
-		if (!selectedTargetId)
-			return alert(
-				lang === "ru" ? "Выберите сообщество" : "Select target",
-			);
+		if (!postText.trim() && attachedFiles.length === 0) {
+			setNotice({
+				title: "Внимание",
+				message:
+					lang === "ru"
+						? "Добавьте текст или медиафайл"
+						: "Add text or media",
+			});
+			return;
+		}
+		if (!selectedTargetId) {
+			setNotice({
+				title: "Внимание",
+				message:
+					lang === "ru" ? "Выберите сообщество" : "Select target",
+			});
+			return;
+		}
 
 		const patId = selectedPatternId || (patterns[0]?.id ?? 1);
 
@@ -676,11 +745,12 @@ export default function App() {
 		if (!selectedTargetId) return;
 		setIsCleaningDisk(true);
 		try {
-			const count = await api.cleanLocalFiles(selectedTargetId);
+			const toTrash = deleteMode === "trash";
+			const count = await api.cleanLocalFiles(selectedTargetId, toTrash);
 			setCleanedDiskCount(count);
 			syncVkQueue(selectedTargetId);
 		} catch (e) {
-			alert("Error: " + e);
+			setNotice({ title: "Ошибка", message: String(e) });
 		} finally {
 			setIsCleaningDisk(false);
 		}
@@ -694,11 +764,13 @@ export default function App() {
 				post.vk_post_id,
 			);
 			if (photos.length === 0) {
-				alert(
-					lang === "ru"
-						? "У поста нет фото вложений"
-						: "No photo attachments found",
-				);
+				setNotice({
+					title: "Медиа ВКонтакте",
+					message:
+						lang === "ru"
+							? "У поста нет фото вложений"
+							: "No photo attachments found",
+				});
 				return;
 			}
 
@@ -723,24 +795,12 @@ export default function App() {
 			setQueue(updater);
 			setHistoryPosts(updater);
 			setAllPosts(updater);
-
-			if (photos[0]?.data_url) {
-				setFullViewImage(photos[0].data_url);
-			}
 		} catch (e) {
-			alert("Error: " + e);
+			setNotice({ title: "Ошибка", message: String(e) });
 		}
 	};
 
 	const handleDeletePattern = async (id: number) => {
-		if (
-			!confirm(
-				lang === "ru"
-					? "Удалить этот паттерн?"
-					: "Delete this pattern?",
-			)
-		)
-			return;
 		try {
 			await api.deletePattern(id);
 			const ptrns = await api.getPatterns();
@@ -749,7 +809,7 @@ export default function App() {
 				setSelectedPatternId(ptrns[0]?.id ?? null);
 			}
 		} catch (e) {
-			alert("Error: " + e);
+			setNotice({ title: "Ошибка", message: String(e) });
 		}
 	};
 
@@ -786,15 +846,7 @@ export default function App() {
 					loadTargetsForAccount(id);
 				}}
 				onDeleteAccount={async () => {
-					if (
-						!activeAccountId ||
-						!confirm(
-							lang === "ru"
-								? "Удалить этот токен?"
-								: "Delete this token?",
-						)
-					)
-						return;
+					if (!activeAccountId) return;
 					await api.deleteAccount(activeAccountId);
 					loadAccounts();
 				}}
@@ -913,7 +965,7 @@ export default function App() {
 						try {
 							await api.startTransfer(selectedTargetId);
 						} catch (e) {
-							alert(e);
+							setNotice({ title: "Ошибка", message: String(e) });
 							setIsTransferring(false);
 							setTransferProgress(null);
 						}
@@ -967,9 +1019,164 @@ export default function App() {
 					onDeletePost={handleDeleteRequest}
 					onOpenFullImage={setFullViewImage}
 					onLoadVkPhotos={handleLoadVkPhotos}
+					onSelectCalendarPost={(post) => setCalendarDetailPost(post)}
 				/>
 			</main>
 
+			{/* Окно информации о посте при клике из календаря */}
+			{calendarDetailPost && (
+				<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-[65] animate-in fade-in duration-150">
+					<div
+						className="border rounded-2xl w-full max-w-md p-5 shadow-2xl space-y-3"
+						style={{
+							backgroundColor: "var(--bg-surface)",
+							borderColor: "var(--border-app)",
+						}}
+					>
+						<div
+							className="flex items-center justify-between pb-2 border-b"
+							style={{ borderColor: "var(--border-app)" }}
+						>
+							<span
+								className="font-bold text-sm"
+								style={{ color: "var(--text-app)" }}
+							>
+								{calendarDetailPost.is_app_created !== false
+									? `Пост #${calendarDetailPost.id}`
+									: "Пост ВКонтакте"}
+							</span>
+							<button
+								onClick={() => setCalendarDetailPost(null)}
+								className="hover:opacity-75 cursor-pointer"
+							>
+								<X className="h-4 w-4" />
+							</button>
+						</div>
+
+						<div className="text-xs space-y-2">
+							<div
+								className="flex items-center justify-between font-mono text-[11px]"
+								style={{ color: "var(--accent)" }}
+							>
+								<span>
+									{format(
+										new Date(
+											calendarDetailPost.scheduled_at_utc,
+										),
+										"dd/MM/yyyy HH:mm",
+									)}
+								</span>
+								<span
+									className="px-2 py-0.5 rounded border"
+									style={{
+										borderColor: "var(--border-light)",
+									}}
+								>
+									{calendarDetailPost.status === "queued"
+										? "Локально"
+										: calendarDetailPost.status ===
+											  "transferred_to_vk"
+											? "В отложке ВК"
+											: calendarDetailPost.status ===
+												  "published"
+												? "Опубликован в ВК"
+												: "Архив"}
+								</span>
+							</div>
+
+							{calendarDetailPost.text && (
+								<p
+									className="leading-relaxed p-2.5 rounded-xl border max-h-40 overflow-y-auto whitespace-pre-wrap"
+									style={{
+										backgroundColor:
+											"var(--bg-surface-sub)",
+										borderColor: "var(--border-light)",
+										color: "var(--text-app)",
+									}}
+								>
+									{calendarDetailPost.text}
+								</p>
+							)}
+
+							{calendarDetailPost.attachments &&
+								calendarDetailPost.attachments.length > 0 && (
+									<div>
+										<span
+											className="text-[11px] font-semibold block mb-1.5"
+											style={{ color: "var(--text-dim)" }}
+										>
+											Вложений (
+											{
+												calendarDetailPost.attachments
+													.length
+											}
+											):
+										</span>
+										<div className="grid grid-cols-4 gap-2">
+											{calendarDetailPost.attachments.map(
+												(att, i) => (
+													<div
+														key={i}
+														onClick={() =>
+															att.thumb_data &&
+															setFullViewImage(
+																att.thumb_data,
+															)
+														}
+														className="h-16 rounded-lg border overflow-hidden p-0.5 cursor-pointer hover:border-[var(--accent)]"
+														style={{
+															backgroundColor:
+																"var(--bg-surface-sub)",
+															borderColor:
+																"var(--border-light)",
+														}}
+													>
+														{att.thumb_data ? (
+															<img
+																src={
+																	att.thumb_data
+																}
+																alt=""
+																className="h-full w-full object-cover rounded"
+															/>
+														) : (
+															<div className="h-full w-full flex items-center justify-center">
+																<FileText
+																	className="h-4 w-4"
+																	style={{
+																		color: "var(--accent)",
+																	}}
+																/>
+															</div>
+														)}
+													</div>
+												),
+											)}
+										</div>
+									</div>
+								)}
+						</div>
+
+						<div
+							className="flex justify-end pt-2 border-t"
+							style={{ borderColor: "var(--border-app)" }}
+						>
+							<button
+								onClick={() => setCalendarDetailPost(null)}
+								className="px-4 py-1.5 font-bold rounded-xl text-xs shadow-md transition-all active:scale-95 cursor-pointer"
+								style={{
+									backgroundColor: "var(--btn-primary-bg)",
+									color: "var(--btn-primary-text)",
+								}}
+							>
+								Закрыть
+							</button>
+						</div>
+					</div>
+				</div>
+			)}
+
+			{/* Live Mockup стены ВК */}
 			<VkLivePreviewModal
 				show={showLivePreviewModal}
 				lang={lang}
@@ -982,6 +1189,14 @@ export default function App() {
 				commentsOnPost={commentsOnPost}
 				slotDisplay={nextSlotDisplay}
 				onClose={() => setShowLivePreviewModal(false)}
+			/>
+
+			{/* Окно сообщений поверх всех диалогов */}
+			<NoticeModal
+				show={notice !== null}
+				title={notice?.title || ""}
+				message={notice?.message || ""}
+				onClose={() => setNotice(null)}
 			/>
 
 			<DeleteConfirmModal
@@ -1000,30 +1215,53 @@ export default function App() {
 				onConfirmClean={handleExecuteCleanDisk}
 			/>
 
+			{/* Окно "Все посты" с выбором цели и пагинацией */}
 			<AllPostsModal
 				show={showAllPostsModal}
 				lang={lang}
 				posts={allPosts}
+				isSyncingWall={isSyncingWall}
+				targets={targets}
+				selectedTargetId={selectedTargetId}
+				onSelectTarget={(id: number) => {
+					setSelectedTargetId(id);
+					localStorage.setItem("vk_selected_target", id.toString());
+				}}
 				onClose={() => setShowAllPostsModal(false)}
 				onDeletePost={handleDeleteRequest}
 				onOpenFullImage={setFullViewImage}
 				onLoadVkPhotos={handleLoadVkPhotos}
+				onSyncWallPosts={() =>
+					selectedTargetId &&
+					handleSyncWallPosts(selectedTargetId, false)
+				}
+				onLoadMoreWallPosts={() =>
+					selectedTargetId &&
+					handleSyncWallPosts(selectedTargetId, true)
+				}
 			/>
 
 			<SettingsModal
 				show={showSettingsModal}
 				theme={theme}
 				lang={lang}
+				deleteMode={deleteMode}
+				onSetDeleteMode={(mode: "permanent" | "trash") => {
+					setDeleteMode(mode);
+					localStorage.setItem("vk_delete_mode", mode);
+				}}
 				onClose={() => setShowSettingsModal(false)}
 				onSetTheme={handleSetTheme}
 				onSetLang={handleSetLang}
 				onBackupDb={async () => {
 					const path = await api.backupDatabase();
-					alert(
-						`${lang === "ru" ? "Бэкап сохранен:" : "Backup saved:"} ${path}`,
-					);
+					setNotice({
+						title: "Резервная копия",
+						message: `${lang === "ru" ? "Бэкап сохранен:" : "Backup saved:"} ${path}`,
+					});
 				}}
 				onCleanExpiredTokens={handleCleanExpiredTokens}
+				onClearDatabase={handleClearDatabase}
 			/>
 
 			<TokenModal
@@ -1055,7 +1293,7 @@ export default function App() {
 						);
 						await loadTargetsForAccount(acc.id);
 					} catch (e) {
-						alert("Error: " + e);
+						setNotice({ title: "Ошибка", message: String(e) });
 					} finally {
 						setIsAddingToken(false);
 					}
@@ -1075,22 +1313,30 @@ export default function App() {
 				onTimesChange={setNewPatternTimes}
 				onIntervalChange={setNewPatternIntervalDays}
 				onSubmit={async () => {
-					if (!newPatternName.trim())
-						return alert(
-							lang === "ru" ? "Укажите имя" : "Enter name",
-						);
+					if (!newPatternName.trim()) {
+						setNotice({
+							title: "Внимание",
+							message:
+								lang === "ru" ? "Укажите имя" : "Enter name",
+						});
+						return;
+					}
 					const times = newPatternTimes
 						.split(",")
 						.map((s) => s.trim())
 						.filter((s) =>
 							/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/.test(s),
 						);
-					if (times.length === 0)
-						return alert(
-							lang === "ru"
-								? "Укажите время ЧЧ:ММ"
-								: "Enter time HH:MM",
-						);
+					if (times.length === 0) {
+						setNotice({
+							title: "Внимание",
+							message:
+								lang === "ru"
+									? "Укажите время ЧЧ:ММ"
+									: "Enter time HH:MM",
+						});
+						return;
+					}
 					const created = await api.createPattern(
 						newPatternName,
 						times,
@@ -1105,7 +1351,6 @@ export default function App() {
 				onDeletePattern={handleDeletePattern}
 			/>
 
-			{/* Окно пакетной генерации с привязкой drag-and-drop */}
 			<BatchModal
 				show={showBatchModal}
 				lang={lang}
@@ -1139,11 +1384,15 @@ export default function App() {
 						setShowBatchModal(false);
 						setBatchPaths([]);
 						if (selectedTargetId) syncVkQueue(selectedTargetId);
-						alert(
-							`${lang === "ru" ? "Создано постов в очередь:" : "Posts generated into queue:"} ${count}`,
-						);
+						setNotice({
+							title:
+								lang === "ru"
+									? "Пакетная генерация"
+									: "Batch Generation",
+							message: `${lang === "ru" ? "Создано постов в очередь:" : "Posts generated into queue:"} ${count}`,
+						});
 					} catch (e) {
-						alert("Error: " + e);
+						setNotice({ title: "Ошибка", message: String(e) });
 					} finally {
 						setIsBatchCreating(false);
 					}

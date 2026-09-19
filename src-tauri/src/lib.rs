@@ -49,7 +49,47 @@ pub fn run() {
                 for statement in include_str!("../migrations/001_initial.sql").split(';') {
                     let stmt = statement.trim();
                     if !stmt.is_empty() {
-                        sqlx::query(stmt).execute(&pool).await.expect("Migration failed");
+                        let _ = sqlx::query(stmt).execute(&pool).await;
+                    }
+                }
+
+                // Миграция схемы: снятие жесткого CHECK constraint для поддержки статусов published и deleted_in_vk
+                let table_sql: Option<String> = sqlx::query_scalar(
+                    "SELECT sql FROM sqlite_master WHERE type='table' AND name='posts'"
+                ).fetch_optional(&pool).await.ok().flatten();
+
+                if let Some(sql) = table_sql {
+                    if sql.contains("CHECK") && !sql.contains("'published'") {
+                        let _ = sqlx::query("PRAGMA foreign_keys=OFF;").execute(&pool).await;
+                        let _ = sqlx::query("ALTER TABLE posts RENAME TO _posts_old;").execute(&pool).await;
+                        let _ = sqlx::query(
+                            "CREATE TABLE posts (
+                                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                account_id INTEGER NOT NULL,
+                                target_id INTEGER NOT NULL,
+                                pattern_id INTEGER NOT NULL,
+                                text TEXT NOT NULL,
+                                scheduled_at_utc TEXT NOT NULL,
+                                guid TEXT NOT NULL UNIQUE,
+                                status TEXT NOT NULL DEFAULT 'queued',
+                                vk_post_id INTEGER,
+                                signed INTEGER NOT NULL DEFAULT 0,
+                                close_comments INTEGER NOT NULL DEFAULT 0,
+                                mute_notifications INTEGER NOT NULL DEFAULT 0,
+                                mark_as_ads INTEGER NOT NULL DEFAULT 0,
+                                attachments_view_mode TEXT NOT NULL DEFAULT 'grid',
+                                error_message TEXT,
+                                created_at_utc TEXT NOT NULL DEFAULT (datetime('now'))
+                            );"
+                        ).execute(&pool).await;
+
+                        let _ = sqlx::query(
+                            "INSERT INTO posts (id, account_id, target_id, pattern_id, text, scheduled_at_utc, guid, status, vk_post_id, signed, close_comments, mute_notifications, mark_as_ads, attachments_view_mode, error_message, created_at_utc)
+                             SELECT id, account_id, target_id, pattern_id, text, scheduled_at_utc, guid, status, vk_post_id, signed, close_comments, mute_notifications, mark_as_ads, attachments_view_mode, error_message, created_at_utc FROM _posts_old;"
+                        ).execute(&pool).await;
+
+                        let _ = sqlx::query("DROP TABLE _posts_old;").execute(&pool).await;
+                        let _ = sqlx::query("PRAGMA foreign_keys=ON;").execute(&pool).await;
                     }
                 }
 
@@ -59,23 +99,6 @@ pub fn run() {
                 let _ = sqlx::query("ALTER TABLE posts ADD COLUMN mark_as_ads INTEGER NOT NULL DEFAULT 0").execute(&pool).await;
                 let _ = sqlx::query("ALTER TABLE posts ADD COLUMN attachments_view_mode TEXT NOT NULL DEFAULT 'grid'").execute(&pool).await;
                 let _ = sqlx::query("ALTER TABLE patterns ADD COLUMN interval_days INTEGER NOT NULL DEFAULT 1").execute(&pool).await;
-
-                // Автоматическое восстановление истории постов при запуске
-                let _ = sqlx::query(
-                    "UPDATE posts
-                     SET target_id = (
-                         SELECT t_new.id FROM targets t_new 
-                         JOIN accounts a ON t_new.account_id = a.id 
-                         JOIN targets t_old ON t_old.owner_id = t_new.owner_id 
-                         WHERE t_old.id = posts.target_id AND a.is_active = 1 LIMIT 1
-                     )
-                     WHERE EXISTS (
-                         SELECT 1 FROM targets t_new 
-                         JOIN accounts a ON t_new.account_id = a.id 
-                         JOIN targets t_old ON t_old.owner_id = t_new.owner_id 
-                         WHERE t_old.id = posts.target_id AND a.is_active = 1
-                     )"
-                ).execute(&pool).await;
 
                 sqlx::query(
                     "INSERT OR IGNORE INTO patterns (id, name, timezone, times_json, days_json, min_interval_minutes, interval_days, is_default)
@@ -118,6 +141,7 @@ pub fn run() {
             commands::post::get_queue,
             commands::post::get_post_history,
             commands::post::get_all_posts,
+            commands::post::sync_vk_wall_posts,
             commands::post::fetch_vk_post_photos,
             commands::post::sync_vk_delayed_posts,
             commands::post::revert_vk_post_to_local_same_time,
@@ -134,6 +158,7 @@ pub fn run() {
             commands::system::save_pasted_image_bytes,
             commands::system::init_client_timezone,
             commands::system::backup_database,
+            commands::system::clear_database_except_tokens,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

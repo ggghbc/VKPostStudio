@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { format } from "date-fns";
 import {
 	Clock,
@@ -20,6 +20,10 @@ import {
 	Calendar,
 	FileText,
 	DownloadCloud,
+	ArrowDownNarrowWide,
+	ArrowUpWideNarrow,
+	Hash,
+	Check,
 } from "lucide-react";
 import { PostItem } from "../types";
 import { ContentCalendar } from "./ContentCalendar";
@@ -53,6 +57,7 @@ interface QueuePanelProps {
 	onDeletePost: (post: PostItem) => void;
 	onOpenFullImage: (url: string) => void;
 	onLoadVkPhotos: (post: PostItem) => void;
+	onSelectCalendarPost: (post: PostItem) => void;
 }
 
 export const QueuePanel: React.FC<QueuePanelProps> = ({
@@ -83,8 +88,29 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
 	onDeletePost,
 	onOpenFullImage,
 	onLoadVkPhotos,
+	onSelectCalendarPost,
 }) => {
 	const t = translations[lang];
+
+	// Сортировка для правой панели
+	const [sortField, setSortField] = useState<"date" | "id" | "status">(
+		"date",
+	);
+	const [sortAsc, setSortAsc] = useState<boolean>(true);
+
+	const sortedPosts = [...displayedPosts].sort((a, b) => {
+		if (sortField === "id") {
+			return sortAsc ? a.id - b.id : b.id - a.id;
+		}
+		if (sortField === "status") {
+			return sortAsc
+				? a.status.localeCompare(b.status)
+				: b.status.localeCompare(a.status);
+		}
+		const tA = new Date(a.scheduled_at_utc).getTime();
+		const tB = new Date(b.scheduled_at_utc).getTime();
+		return sortAsc ? tA - tB : tB - tA;
+	});
 
 	return (
 		<section
@@ -95,8 +121,8 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
 			}`}
 			style={{ backgroundColor: "var(--bg-surface-sub)" }}
 		>
-			<div className="mb-4 flex items-center justify-between gap-2.5 flex-nowrap">
-				{/* Ультра-компактные вкладки: иконка + счётчик без длинных слов */}
+			<div className="mb-4 flex items-center justify-between gap-2 flex-wrap">
+				{/* Компактные вкладки */}
 				<div
 					className="inline-flex items-center rounded-xl p-1 border gap-1 shadow-inner flex-shrink-0"
 					style={{
@@ -106,7 +132,7 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
 				>
 					<button
 						onClick={() => onSetTab("local")}
-						className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all"
+						className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer"
 						style={{
 							backgroundColor:
 								activeQueueTab === "local"
@@ -127,7 +153,7 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
 
 					<button
 						onClick={() => onSetTab("vk")}
-						className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all"
+						className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer"
 						style={{
 							backgroundColor:
 								activeQueueTab === "vk"
@@ -148,7 +174,7 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
 
 					<button
 						onClick={() => onSetTab("history")}
-						className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all"
+						className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer"
 						style={{
 							backgroundColor:
 								activeQueueTab === "history"
@@ -168,10 +194,105 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
 					</button>
 				</div>
 
-				{/* Правые кнопки действий */}
-				<div className="flex items-center gap-1.5 ml-auto flex-shrink-0">
+				{/* Правый блок управления с сегментированными кнопками сортировки */}
+				<div className="flex items-center gap-1.5 ml-auto flex-wrap">
+					{/* Склеенные кнопки сортировки без текста */}
 					<div
-						className="flex items-center border rounded-xl p-0.5"
+						className="flex items-center border rounded-xl p-0.5 overflow-hidden shadow-sm"
+						style={{
+							backgroundColor: "var(--bg-surface)",
+							borderColor: "var(--border-app)",
+						}}
+					>
+						<button
+							onClick={() => {
+								if (sortField === "date") setSortAsc(!sortAsc);
+								else {
+									setSortField("date");
+									setSortAsc(true);
+								}
+							}}
+							className="p-1.5 rounded-lg text-xs transition-colors cursor-pointer"
+							style={{
+								backgroundColor:
+									sortField === "date"
+										? "var(--tab-active-bg)"
+										: "transparent",
+								color:
+									sortField === "date"
+										? "var(--tab-active-text)"
+										: "var(--text-muted)",
+							}}
+							title={
+								sortField === "date"
+									? sortAsc
+										? "По дате (раньше)"
+										: "По дате (позже)"
+									: "Сортировка по дате"
+							}
+						>
+							{sortField === "date" && !sortAsc ? (
+								<ArrowDownNarrowWide className="h-4 w-4" />
+							) : (
+								<ArrowUpWideNarrow className="h-4 w-4" />
+							)}
+						</button>
+
+						<button
+							onClick={() => {
+								if (sortField === "id") setSortAsc(!sortAsc);
+								else {
+									setSortField("id");
+									setSortAsc(false);
+								}
+							}}
+							className="p-1.5 rounded-lg text-xs transition-colors cursor-pointer"
+							style={{
+								backgroundColor:
+									sortField === "id"
+										? "var(--tab-active-bg)"
+										: "transparent",
+								color:
+									sortField === "id"
+										? "var(--tab-active-text)"
+										: "var(--text-muted)",
+							}}
+							title={
+								sortField === "id"
+									? sortAsc
+										? "По ID (старые)"
+										: "По ID (новые)"
+									: "Сортировка по ID"
+							}
+						>
+							<Hash className="h-4 w-4" />
+						</button>
+
+						<button
+							onClick={() => {
+								setSortField("status");
+								setSortAsc(!sortAsc);
+							}}
+							className="p-1.5 rounded-lg text-xs transition-colors cursor-pointer"
+							style={{
+								backgroundColor:
+									sortField === "status"
+										? "var(--tab-active-bg)"
+										: "transparent",
+								color:
+									sortField === "status"
+										? "var(--tab-active-text)"
+										: "var(--text-muted)",
+							}}
+							title="Сортировка по статусу"
+						>
+							<Check className="h-4 w-4" />
+						</button>
+					</div>
+
+					{/* Переключение вида */}
+					<div
+						className="flex items-center border rounded-xl p-0.5 shadow-sm"
 						style={{
 							backgroundColor: "var(--bg-surface)",
 							borderColor: "var(--border-app)",
@@ -179,7 +300,7 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
 					>
 						<button
 							onClick={() => onSetViewMode("list")}
-							className="p-1.5 rounded-lg text-xs transition-colors"
+							className="p-1.5 rounded-lg text-xs transition-colors cursor-pointer"
 							style={{
 								backgroundColor:
 									queueViewMode === "list"
@@ -190,13 +311,13 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
 										? "var(--tab-active-text)"
 										: "var(--text-muted)",
 							}}
-							title="List"
+							title="Список"
 						>
 							<ListFilter className="h-4 w-4" />
 						</button>
 						<button
 							onClick={() => onSetViewMode("calendar")}
-							className="p-1.5 rounded-lg text-xs transition-colors"
+							className="p-1.5 rounded-lg text-xs transition-colors cursor-pointer"
 							style={{
 								backgroundColor:
 									queueViewMode === "calendar"
@@ -207,7 +328,7 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
 										? "var(--tab-active-text)"
 										: "var(--text-muted)",
 							}}
-							title="Calendar"
+							title="Календарь"
 						>
 							<CalendarDays className="h-4 w-4" />
 						</button>
@@ -215,7 +336,7 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
 
 					<button
 						onClick={onCleanLocalFiles}
-						className="p-2 rounded-xl border hover:opacity-80 transition-all"
+						className="p-2 rounded-xl border hover:opacity-80 transition-all cursor-pointer"
 						style={{
 							backgroundColor: "var(--bg-surface)",
 							borderColor: "var(--border-app)",
@@ -232,13 +353,13 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
 					<button
 						onClick={onSyncVk}
 						disabled={isSyncingVk}
-						className="p-2 rounded-xl border hover:opacity-80 transition-all"
+						className="p-2 rounded-xl border hover:opacity-80 transition-all cursor-pointer"
 						style={{
 							backgroundColor: "var(--bg-surface)",
 							borderColor: "var(--border-app)",
 							color: "var(--text-app)",
 						}}
-						title="Sync"
+						title={lang === "ru" ? "Синхронизация" : "Sync"}
 					>
 						<RefreshCw
 							className={`h-4 w-4 ${isSyncingVk ? "animate-spin" : ""}`}
@@ -257,7 +378,7 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
 										p.status === "failed",
 								).length === 0
 							}
-							className="flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-bold transition-all shadow-md active:scale-95 disabled:opacity-40"
+							className="flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-bold transition-all shadow-md active:scale-95 disabled:opacity-40 cursor-pointer"
 							style={{
 								backgroundColor: "var(--btn-primary-bg)",
 								color: "var(--btn-primary-text)",
@@ -282,13 +403,13 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
 			{queueViewMode === "calendar" ? (
 				<ContentCalendar
 					month={contentCalendarMonth}
-					posts={displayedPosts}
+					posts={sortedPosts}
 					onMonthChange={onSetContentMonth}
-					onSelectPost={onToggleExpand}
+					onSelectPost={onSelectCalendarPost}
 				/>
 			) : (
 				<div className="flex-1 overflow-y-auto space-y-2.5 pr-1">
-					{displayedPosts.length === 0 ? (
+					{sortedPosts.length === 0 ? (
 						<div
 							className="flex flex-col items-center justify-center h-56 border border-dashed rounded-2xl text-xs opacity-60"
 							style={{ borderColor: "var(--border-light)" }}
@@ -303,13 +424,16 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
 							</span>
 						</div>
 					) : (
-						displayedPosts.map((post) => {
+						sortedPosts.map((post) => {
 							const isExpanded = expandedPostIds.includes(
 								post.id,
 							);
 							const isVkPost =
 								post.status === "transferred_to_vk";
-							const isPublished = post.status === "archived";
+							const isPublished = post.status === "published";
+							const isDeletedInVk =
+								post.status === "deleted_in_vk";
+							const isAppCreated = post.is_app_created !== false;
 
 							return (
 								<div
@@ -325,10 +449,28 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
 										className="flex items-start justify-between gap-4 p-4 cursor-pointer select-none"
 									>
 										<div className="flex-1 min-w-0">
-											<div className="flex items-center gap-2.5 text-xs mb-2">
-												<span className="text-[11px] font-mono opacity-50">
-													#{post.id}
-												</span>
+											<div className="flex items-center gap-2 text-xs mb-2 flex-wrap">
+												{/* Выводим номер только если пост создан в приложении */}
+												{isAppCreated ? (
+													<span className="text-[11px] font-mono opacity-60 font-bold">
+														#{post.id}
+													</span>
+												) : (
+													<span
+														className="text-[10px] px-1.5 py-0.2 rounded border font-semibold opacity-80"
+														style={{
+															backgroundColor:
+																"var(--bg-surface-sub)",
+															borderColor:
+																"var(--border-light)",
+															color: "var(--accent)",
+														}}
+														title="Пост обнаружен на стене ВКонтакте"
+													>
+														ВК
+													</span>
+												)}
+
 												<span
 													className="font-semibold font-mono"
 													style={{
@@ -393,6 +535,11 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
 														{t.statusPublished}
 													</span>
 												)}
+												{isDeletedInVk && (
+													<span className="flex items-center gap-1 rounded-md bg-slate-500/15 px-2 py-0.5 text-[10px] font-semibold opacity-70 border border-slate-500/30">
+														{t.statusDeletedInVk}
+													</span>
+												)}
 
 												{post.attachments_count > 0 && (
 													<span className="text-[11px] opacity-70">
@@ -430,7 +577,7 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
 													e.stopPropagation();
 													onDeletePost(post);
 												}}
-												className="p-1.5 hover:text-rose-400 transition-colors"
+												className="p-1.5 hover:text-rose-400 transition-colors cursor-pointer"
 												style={{
 													color: "var(--text-muted)",
 												}}
@@ -459,8 +606,9 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
 													"var(--bg-surface-sub)",
 											}}
 										>
+											{/* Обертка с break-words и break-all для длинных ошибок */}
 											{post.error_message && (
-												<div className="mb-3 p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-xs text-rose-400 leading-relaxed">
+												<div className="mb-3 p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-xs text-rose-400 leading-relaxed break-words break-all whitespace-pre-wrap overflow-hidden">
 													<strong>
 														{t.statusError}:
 													</strong>{" "}
@@ -486,7 +634,7 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
 													{t.actions}
 												</span>
 
-												{/* Кнопка "В редактор" скрыта для опубликованных постов */}
+												{/* Кнопка "В редактор" только для неопубликованных локальных постов */}
 												{!isVkPost && !isPublished && (
 													<button
 														onClick={(e) => {
@@ -495,7 +643,7 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
 																post,
 															);
 														}}
-														className="px-3 py-1.5 rounded-lg border text-xs font-semibold flex items-center gap-1.5 hover:opacity-80 transition-all"
+														className="px-3 py-1.5 rounded-lg border text-xs font-semibold flex items-center gap-1.5 hover:opacity-80 transition-all cursor-pointer"
 														style={{
 															backgroundColor:
 																"var(--bg-surface-sub)",
@@ -516,31 +664,30 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
 													</button>
 												)}
 
-												{/* Кнопка загрузки картинок из ВК */}
-												{isPublished &&
-													post.vk_post_id && (
-														<button
-															onClick={(e) => {
-																e.stopPropagation();
-																onLoadVkPhotos(
-																	post,
-																);
-															}}
-															className="px-3 py-1.5 rounded-lg border text-xs font-semibold flex items-center gap-1.5 hover:opacity-80 transition-all"
-															style={{
-																backgroundColor:
-																	"var(--bg-surface-sub)",
-																borderColor:
-																	"var(--border-light)",
-																color: "var(--accent)",
-															}}
-														>
-															<DownloadCloud className="h-3.5 w-3.5" />
-															<span>
-																{t.loadVkPhotos}
-															</span>
-														</button>
-													)}
+												{/* Кнопка загрузки картинок из ВК (для отложенных и опубликованных) */}
+												{post.vk_post_id && (
+													<button
+														onClick={(e) => {
+															e.stopPropagation();
+															onLoadVkPhotos(
+																post,
+															);
+														}}
+														className="px-3 py-1.5 rounded-lg border text-xs font-semibold flex items-center gap-1.5 hover:opacity-80 transition-all cursor-pointer"
+														style={{
+															backgroundColor:
+																"var(--bg-surface-sub)",
+															borderColor:
+																"var(--border-light)",
+															color: "var(--accent)",
+														}}
+													>
+														<DownloadCloud className="h-3.5 w-3.5" />
+														<span>
+															{t.loadVkPhotos}
+														</span>
+													</button>
+												)}
 
 												{isVkPost && (
 													<button
@@ -550,7 +697,7 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
 																post,
 															);
 														}}
-														className="px-3 py-1.5 rounded-lg border text-xs font-semibold flex items-center gap-1.5 hover:opacity-80 transition-all"
+														className="px-3 py-1.5 rounded-lg border text-xs font-semibold flex items-center gap-1.5 hover:opacity-80 transition-all cursor-pointer"
 														style={{
 															backgroundColor:
 																"var(--bg-surface-sub)",
@@ -580,7 +727,7 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
 																	post.id,
 																);
 															}}
-															className="px-3 py-1.5 rounded-lg border text-xs font-medium flex items-center gap-1.5 hover:opacity-80 transition-opacity"
+															className="px-3 py-1.5 rounded-lg border text-xs font-medium flex items-center gap-1.5 hover:opacity-80 transition-opacity cursor-pointer"
 															style={{
 																backgroundColor:
 																	"var(--bg-surface-sub)",
@@ -606,7 +753,7 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
 																	post,
 																);
 															}}
-															className="px-3 py-1.5 rounded-lg border text-xs font-medium flex items-center gap-1.5 hover:opacity-80 transition-opacity"
+															className="px-3 py-1.5 rounded-lg border text-xs font-medium flex items-center gap-1.5 hover:opacity-80 transition-opacity cursor-pointer"
 															style={{
 																backgroundColor:
 																	"var(--bg-surface-sub)",
@@ -651,7 +798,7 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
 																			att.thumb_data,
 																		)
 																	}
-																	className="h-20 rounded-lg border flex flex-col items-center justify-center overflow-hidden p-1 relative hover:border-[var(--accent)] transition-colors"
+																	className="h-20 rounded-lg border flex flex-col items-center justify-center overflow-hidden p-1 relative hover:border-[var(--accent)] transition-colors cursor-pointer"
 																	style={{
 																		backgroundColor:
 																			"var(--bg-surface)",

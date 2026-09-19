@@ -35,6 +35,7 @@ pub struct PostDto {
     pub target_id: i64,
     pub vk_post_id: Option<i64>,
     pub target_title: Option<String>,
+    pub is_app_created: bool,
     pub attachments: Vec<AttachmentDto>,
 }
 
@@ -66,6 +67,9 @@ fn get_thumbs_dir(app: &AppHandle) -> PathBuf {
 }
 
 fn map_post_row(r: &sqlx::sqlite::SqliteRow, attachments: Vec<AttachmentDto>) -> PostDto {
+    let guid: String = r.try_get("guid").unwrap_or_default();
+    let is_app_created = !guid.starts_with("vk_ext_");
+
     PostDto {
         id: r.try_get::<i64, _>("id").unwrap_or(0),
         text: r.try_get::<String, _>("text").unwrap_or_default(),
@@ -81,6 +85,7 @@ fn map_post_row(r: &sqlx::sqlite::SqliteRow, attachments: Vec<AttachmentDto>) ->
         target_id: r.try_get::<i64, _>("target_id").unwrap_or(0),
         vk_post_id: r.try_get::<Option<i64>, _>("vk_post_id").unwrap_or(None),
         target_title: r.try_get::<Option<String>, _>("target_title").unwrap_or(None),
+        is_app_created,
         attachments,
     }
 }
@@ -138,7 +143,7 @@ pub async fn get_queue(target_id: i64, app: AppHandle, state: State<'_, AppState
          FROM posts p
          JOIN targets t ON p.target_id = t.id
          WHERE t.owner_id = (SELECT owner_id FROM targets WHERE id = ?) 
-           AND p.status IN ('queued', 'failed') 
+           AND p.status IN ('queued', 'failed', 'transferred_to_vk') 
          ORDER BY datetime(p.scheduled_at_utc) ASC"
     )
     .bind(target_id)
@@ -209,6 +214,88 @@ pub async fn get_all_posts(app: AppHandle, state: State<'_, AppState>) -> Result
     }
 
     Ok(result)
+}
+
+#[tauri::command]
+pub async fn sync_vk_wall_posts(target_id: i64, offset: u32, state: State<'_, AppState>) -> Result<usize, String> {
+    let target_row = sqlx::query("SELECT account_id, owner_id FROM targets WHERE id = ?")
+        .bind(target_id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let account_id: i64 = target_row.get("account_id");
+    let owner_id: i64 = target_row.get("owner_id");
+
+    let token_row = sqlx::query("SELECT token FROM accounts WHERE id = ?")
+        .bind(account_id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let token: String = token_row.get("token");
+    let vk = VkClient::new(token);
+
+    let wall_posts = vk.get_wall_posts(owner_id, 30, offset).await.map_err(|e| e.to_string())?;
+    let mut added_count = 0;
+
+    for item in wall_posts {
+        let exists = sqlx::query("SELECT id FROM posts WHERE vk_post_id = ?")
+            .bind(item.id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let sched_dt = chrono::DateTime::from_timestamp(item.date, 0)
+            .unwrap_or_else(chrono::Utc::now)
+            .to_rfc3339();
+        let text = item.text.unwrap_or_default();
+
+        if let Some(row) = exists {
+            let pid: i64 = row.get("id");
+            sqlx::query("UPDATE posts SET status = 'published', scheduled_at_utc = ? WHERE id = ?")
+                .bind(&sched_dt)
+                .bind(pid)
+                .execute(&state.db)
+                .await
+                .ok();
+        } else {
+            let guid = format!("vk_ext_{}_{}", target_id, item.id);
+            let new_pid = sqlx::query(
+                "INSERT INTO posts (
+                    account_id, target_id, pattern_id, text, scheduled_at_utc, guid,
+                    status, vk_post_id, signed, close_comments, mute_notifications, mark_as_ads, attachments_view_mode
+                ) VALUES (
+                    ?, ?, 1, ?, ?, ?, 'published', ?, 0, 0, 0, 0, 'grid'
+                ) RETURNING id"
+            )
+            .bind(account_id)
+            .bind(target_id)
+            .bind(&text)
+            .bind(&sched_dt)
+            .bind(&guid)
+            .bind(item.id)
+            .fetch_one(&state.db)
+            .await
+            .map_err(|e| e.to_string())?
+            .get::<i64, _>("id");
+
+            for i in 0..item.attachments_count {
+                sqlx::query(
+                    "INSERT INTO attachments (post_id, file_name, size_bytes, attachment_kind, upload_status, order_index)
+                     VALUES (?, 'vk_media', 0, 'photo', 'uploaded', ?)"
+                )
+                .bind(new_pid)
+                .bind(i as i32)
+                .execute(&state.db)
+                .await
+                .ok();
+            }
+            added_count += 1;
+        }
+    }
+
+    Ok(added_count)
 }
 
 #[tauri::command]
@@ -382,24 +469,37 @@ pub async fn sync_vk_delayed_posts(target_id: i64, app: AppHandle, state: State<
                 }
             }
 
-            // Проверяем статус постов, покинувших список отложки
             let local_scheduled = sqlx::query(
-                "SELECT id, vk_post_id FROM posts 
-                 WHERE target_id = ? AND status = 'transferred_to_vk' 
-                   AND vk_post_id IS NOT NULL"
+                "SELECT p.id, p.vk_post_id, p.scheduled_at_utc 
+                 FROM posts p 
+                 JOIN targets t ON p.target_id = t.id
+                 WHERE t.owner_id = ? AND p.status = 'transferred_to_vk' 
+                   AND p.vk_post_id IS NOT NULL"
             )
-            .bind(target_id)
+            .bind(owner_id)
             .fetch_all(&state.db)
             .await
             .map_err(|e| e.to_string())?;
 
+            let now_utc = chrono::Utc::now();
+
             for row in local_scheduled {
                 let pid: i64 = row.get("id");
                 let vk_id: i64 = row.get("vk_post_id");
+                let sched_str: String = row.get("scheduled_at_utc");
+
                 if !vk_post_ids.contains(&vk_id) {
-                    // Если пост исчез из отложки, проверяем, опубликован ли он на стене
-                    let is_published = vk.check_wall_post_published(owner_id, vk_id).await.unwrap_or(false);
-                    let new_status = if is_published { "published" } else { "deleted_in_vk" };
+                    let sched_dt = chrono::DateTime::parse_from_rfc3339(&sched_str)
+                        .map(|d| d.with_timezone(&chrono::Utc))
+                        .unwrap_or(now_utc);
+
+                    // Если дата ещё в будущем, пост удалён из отложки ВК
+                    let new_status = if sched_dt > (now_utc + chrono::Duration::minutes(1)) {
+                        "deleted_in_vk"
+                    } else {
+                        let is_published = vk.check_wall_post_published(owner_id, vk_id).await.unwrap_or(false);
+                        if is_published { "published" } else { "deleted_in_vk" }
+                    };
 
                     sqlx::query("UPDATE posts SET status = ? WHERE id = ?")
                         .bind(new_status)
@@ -615,7 +715,11 @@ pub async fn update_post(
 }
 
 #[tauri::command]
-pub async fn clean_uploaded_local_files(target_id: i64, state: State<'_, AppState>) -> Result<i64, String> {
+pub async fn clean_uploaded_local_files(
+    target_id: i64,
+    to_trash: bool,
+    state: State<'_, AppState>,
+) -> Result<i64, String> {
     let rows = sqlx::query(
         "SELECT a.id, a.local_path 
          FROM attachments a 
@@ -636,7 +740,26 @@ pub async fn clean_uploaded_local_files(target_id: i64, state: State<'_, AppStat
         let path_str: String = r.get("local_path");
         let path = std::path::Path::new(&path_str);
         if path.exists() {
-            if let Ok(_) = tokio::fs::remove_file(path).await {
+            if to_trash {
+                #[cfg(target_os = "windows")]
+                {
+                    use std::os::windows::process::CommandExt;
+                    let mut cmd = std::process::Command::new("powershell");
+                    cmd.args(["-NoProfile", "-NonInteractive", "-Command",
+                        &format!("Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile('{}', 'OnlyErrorDialogs', 'SendToRecycleBin')", path_str.replace('\'', "''"))
+                    ]);
+                    cmd.creation_flags(0x08000000);
+                    if cmd.status().map(|s| s.success()).unwrap_or(false) {
+                        deleted_count += 1;
+                    }
+                }
+                #[cfg(not(target_os = "windows"))]
+                {
+                    if tokio::fs::remove_file(path).await.is_ok() {
+                        deleted_count += 1;
+                    }
+                }
+            } else if tokio::fs::remove_file(path).await.is_ok() {
                 deleted_count += 1;
             }
         }

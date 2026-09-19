@@ -13,6 +13,7 @@ interface CustomSelectProps {
 	className?: string;
 	maxWidth?: string;
 	icon?: React.ReactNode;
+	dropUp?: boolean;
 }
 
 export const CustomSelect: React.FC<CustomSelectProps> = ({
@@ -22,6 +23,7 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
 	className = "",
 	maxWidth = "280px",
 	icon,
+	dropUp = false,
 }) => {
 	const [isOpen, setIsOpen] = useState(false);
 	const ref = useRef<HTMLDivElement>(null);
@@ -69,7 +71,9 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
 
 			{isOpen && (
 				<div
-					className="absolute left-0 top-full mt-1 w-full min-w-[200px] max-h-60 overflow-y-auto rounded-xl border p-1 shadow-2xl z-50 animate-in fade-in duration-100"
+					className={`absolute left-0 w-full min-w-[200px] max-h-56 overflow-y-auto rounded-xl border p-1 shadow-2xl z-50 animate-in fade-in duration-100 ${
+						dropUp ? "bottom-full mb-1" : "top-full mt-1"
+					}`}
 					style={{
 						backgroundColor: "var(--bg-surface)",
 						borderColor: "var(--border-light)",

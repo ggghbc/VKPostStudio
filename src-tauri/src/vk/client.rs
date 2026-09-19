@@ -230,8 +230,7 @@ impl VkClient {
     }
 
     pub async fn get_postponed_posts(&self, owner_id: i64) -> Result<Vec<VkPostponedItem>> {
-        let clean_owner_id = -owner_id.abs();
-        let owner_id_str = clean_owner_id.to_string();
+        let owner_id_str = owner_id.to_string();
 
         let params = vec![
             ("access_token", self.token.as_str()),
@@ -243,28 +242,7 @@ impl VkClient {
 
         let res_val: serde_json::Value = match self.get_vk("wall.get", params.clone()).await {
             Ok(val) => val,
-            Err(e_get) => match self.post_vk("wall.get", params).await {
-                Ok(val) => val,
-                Err(e_post) => {
-                    let code = format!(
-                        "return API.wall.get({{\"owner_id\": {}, \"filter\": \"postponed\", \"count\": 100}});",
-                        clean_owner_id
-                    );
-                    self.post_vk(
-                        "execute",
-                        vec![
-                            ("access_token", self.token.as_str()),
-                            ("v", self.v),
-                            ("code", &code),
-                        ],
-                    )
-                    .await
-                    .context(format!(
-                        "Не удалось получить отложку: GET: {}, POST: {}",
-                        e_get, e_post
-                    ))?
-                }
-            },
+            Err(_) => self.post_vk("wall.get", params).await?,
         };
 
         let items_arr = res_val
@@ -296,7 +274,50 @@ impl VkClient {
         Ok(result)
     }
 
-    // Проверка, опубликован ли пост реально на стене (или он был удалён из отложки пользователем)
+    pub async fn get_wall_posts(&self, owner_id: i64, count: u32, offset: u32) -> Result<Vec<VkPostponedItem>> {
+        let owner_id_str = owner_id.to_string();
+        let count_str = count.to_string();
+        let offset_str = offset.to_string();
+
+        let params = vec![
+            ("access_token", self.token.as_str()),
+            ("v", self.v),
+            ("owner_id", owner_id_str.as_str()),
+            ("filter", "owner"),
+            ("count", count_str.as_str()),
+            ("offset", offset_str.as_str()),
+        ];
+
+        let res_val: serde_json::Value = self.get_vk("wall.get", params).await?;
+        let items_arr = res_val
+            .get("items")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| anyhow!("Ответ не содержит items: {:?}", res_val))?;
+
+        let mut result = Vec::new();
+        for item in items_arr {
+            let id = item.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
+            let date = item.get("date").and_then(|v| v.as_i64()).unwrap_or(0);
+            let text = item.get("text").and_then(|v| v.as_str()).map(|s| s.to_string());
+            let att_count = item
+                .get("attachments")
+                .and_then(|v| v.as_array())
+                .map(|a| a.len() as i64)
+                .unwrap_or(0);
+
+            if id > 0 && date > 0 {
+                result.push(VkPostponedItem {
+                    id,
+                    date,
+                    text,
+                    attachments_count: att_count,
+                });
+            }
+        }
+
+        Ok(result)
+    }
+
     pub async fn check_wall_post_published(&self, owner_id: i64, post_id: i64) -> Result<bool> {
         let post_key = format!("{}_{}", owner_id, post_id);
         let url = format!(
@@ -311,8 +332,7 @@ impl VkClient {
     }
 
     pub async fn delete_wall_post(&self, owner_id: i64, post_id: i64) -> Result<()> {
-        let clean_owner_id = -owner_id.abs();
-        let owner_id_str = clean_owner_id.to_string();
+        let owner_id_str = owner_id.to_string();
         let post_id_str = post_id.to_string();
 
         let _: serde_json::Value = self
@@ -342,7 +362,6 @@ impl VkClient {
             .to_lowercase();
 
         let safe_name = format!("upload_{}.{}", rand::random::<u32>(), ext);
-
         let is_group = target_owner_id < 0;
         let group_id_str = target_owner_id.abs().to_string();
 
@@ -377,7 +396,8 @@ impl VkClient {
             .post(&srv.upload_url)
             .multipart(form)
             .send()
-            .await?
+            .await
+            .map_err(|e| anyhow!("Сбой передачи файла на сервер ВК: {}", e))?
             .json()
             .await
             .context("VK upload server вернул некорректный ответ")?;
@@ -474,7 +494,6 @@ impl VkClient {
     ) -> Result<i64> {
         let attachments_str = attachments.join(",");
         let from_group_val = if from_group { "1" } else { "0" };
-
         let mode = if attachments_view_mode == "carousel" { "carousel" } else { "grid" };
 
         let mut params = vec![

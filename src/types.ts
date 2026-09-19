@@ -52,6 +52,7 @@ export interface PostItem {
 	target_id: number;
 	vk_post_id?: number | null;
 	target_title?: string;
+	is_app_created?: boolean;
 	attachments: AttachmentItem[];
 }
 
