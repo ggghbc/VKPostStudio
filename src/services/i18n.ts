@@ -123,6 +123,11 @@ export interface TranslationSchema {
 	loadMoreBtn: string;
 	wallPostBadge: string;
 	mediaFiles: string;
+	tabLocalQueue: string;
+	tabVkQueue: string;
+	tabHistoryQueue: string;
+	errorReason: string;
+	noActiveToken: string;
 }
 
 export const translations: Record<Lang, TranslationSchema> = {
@@ -254,6 +259,11 @@ export const translations: Record<Lang, TranslationSchema> = {
 		loadMoreBtn: "Загрузить ещё",
 		wallPostBadge: "Стена ВК",
 		mediaFiles: "медиа",
+		tabLocalQueue: "Локальная очередь",
+		tabVkQueue: "Отложка ВК",
+		tabHistoryQueue: "История",
+		errorReason: "Причина ошибки:",
+		noActiveToken: "Нет актуального токена, добавьте через меню сверху.",
 	},
 	en: {
 		appTitle: "VK Post Studio",
@@ -381,5 +391,77 @@ export const translations: Record<Lang, TranslationSchema> = {
 		loadMoreBtn: "Load More",
 		wallPostBadge: "VK Wall",
 		mediaFiles: "media",
+		tabLocalQueue: "Local Queue",
+		tabVkQueue: "VK Postponed",
+		tabHistoryQueue: "History",
+		errorReason: "Error reason:",
+		noActiveToken: "No valid token, add one via the top menu.",
 	},
 };
+
+export function formatNormalizedError(
+	rawError: string | undefined | null,
+	lang: Lang,
+): string {
+	if (!rawError) return "";
+	const clean = rawError
+		.trim()
+		.replace(/^Ошибка:\s*/i, "")
+		.replace(/^Ошибка:\s*/i, "")
+		.trim();
+
+	const isRu = lang === "ru";
+
+	if (clean.includes("error 5") || clean.includes("User authorization failed")) {
+		return isRu
+			? "Требуется повторный вход: токен устарел или изменился IP/VPN (код ошибки 5)."
+			: "Authorization required: token expired or IP/VPN changed (error code 5).";
+	}
+	if (clean.includes("error 27")) {
+		return isRu
+			? "Недостаточно прав: для публикации от имени группы требуется токен пользователя-администратора (код ошибки 27)."
+			: "Insufficient permissions: admin user token required (error code 27).";
+	}
+	if (clean.includes("error 15") || clean.includes("Access denied")) {
+		return isRu
+			? "Доступ запрещен: проверьте права доступа вашего аккаунта к сообществу (код ошибки 15)."
+			: "Access denied: check account permissions for this community (error code 15).";
+	}
+	if (clean.includes("error 214")) {
+		return isRu
+			? "Публикация на стене запрещена настройками сообщества (код ошибки 214)."
+			: "Wall posting denied by community settings (error code 214).";
+	}
+	if (clean.includes("error 219")) {
+		return isRu
+			? "Достигнут суточный лимит рекламных записей в сообществе (код ошибки 219)."
+			: "Daily advertisement post limit reached (error code 219).";
+	}
+	if (clean.includes("error 223")) {
+		return isRu
+			? "Превышен суточный лимит отложенных записей ВКонтакте (максимум 250 постов) (код ошибки 223)."
+			: "VK postponed posts limit reached (maximum 250 posts) (error code 223).";
+	}
+	if (clean.includes("error 100")) {
+		return isRu
+			? "Один из параметров публикации передан некорректно (код ошибки 100)."
+			: "One of the post parameters is invalid (error code 100).";
+	}
+	if (
+		clean.includes("error sending request") ||
+		clean.includes("connection closed") ||
+		clean.includes("timed out")
+	) {
+		return isRu
+			? "Сбой соединения с серверами ВКонтакте (ошибка сети/таймаут). Проверьте интернет-подключение."
+			: "Failed to connect to VK servers (network timeout). Please check your internet connection.";
+	}
+	if (clean.includes("Файл не найден") || clean.includes("not found")) {
+		return isRu
+			? clean
+			: "Original attachment file was not found on local disk.";
+	}
+
+	return clean;
+}
+

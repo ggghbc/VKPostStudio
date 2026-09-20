@@ -58,6 +58,9 @@ export default function App() {
 			return saved ? Number(saved) : null;
 		},
 	);
+	const [isTokenExpired, setIsTokenExpired] = useState(false);
+	const hasActiveToken =
+		accounts.length > 0 && activeAccountId !== null && !isTokenExpired;
 
 	const [targets, setTargets] = useState<Target[]>([]);
 	const [selectedTargetId, setSelectedTargetId] = useState<number | null>(
@@ -307,6 +310,16 @@ export default function App() {
 							}
 						} catch (err) {
 							console.error("Ошибка сохранения из буфера:", err);
+							setNotice({
+								title:
+									lang === "ru"
+										? "Ошибка вставки"
+										: "Paste Error",
+								message:
+									lang === "ru"
+										? `Не удалось сохранить изображение из буфера обмена: ${String(err)}`
+										: `Failed to save image from clipboard: ${String(err)}`,
+							});
 						}
 					}
 					break;
@@ -316,7 +329,7 @@ export default function App() {
 
 		window.addEventListener("paste", handleWindowPaste);
 		return () => window.removeEventListener("paste", handleWindowPaste);
-	}, []);
+	}, [lang]);
 
 	useEffect(() => {
 		let isCancelled = false;
@@ -539,10 +552,28 @@ export default function App() {
 		const safetyTimer = setTimeout(() => setIsSyncingVk(false), 14000);
 		try {
 			const res = await api.syncVkQueue(tId);
+			setIsTokenExpired(false);
 			setQueue(res.posts);
 			await loadHistory(tId);
 		} catch (e) {
 			console.error(e);
+			const errStr = String(e || "");
+			if (
+				errStr.includes("error 5") ||
+				errStr.includes("User authorization failed")
+			) {
+				setIsTokenExpired(true);
+				setNotice({
+					title:
+						lang === "ru"
+							? "Требуется обновить токен"
+							: "Token Update Required",
+					message:
+						lang === "ru"
+							? "Срок действия токена истёк или сменился IP-адрес. Пожалуйста, обновите токен через кнопку «+ Добавить токен»."
+							: "Token expired or IP address changed. Please re-authenticate via '+ Add Token'.",
+				});
+			}
 			try {
 				const q = await api.getQueue(tId);
 				setQueue(q);
@@ -574,6 +605,7 @@ export default function App() {
 				errStr.includes("error 5") ||
 				errStr.includes("User authorization failed")
 			) {
+				setIsTokenExpired(true);
 				setNotice({
 					title:
 						lang === "ru"
@@ -683,21 +715,41 @@ export default function App() {
 				thumb_data: f.previewUrl || null,
 			}));
 
-			await api.updatePost({
-				postId: editingPostId,
-				text: postText.trim(),
-				signed: authorsName,
-				closeComments: !commentsOnPost,
-				muteNotifications: !notifyFollowers,
-				markAsAds: adFromCreator,
-				attachmentsViewMode,
-				attachments: payloadAttachments,
-			});
-			setEditingPostId(null);
-			setPostText("");
-			setAttachedFiles([]);
-			localStorage.removeItem("vk_draft");
-			syncVkQueue(selectedTargetId);
+			const targetDate = new Date(selectedDate.getTime());
+			targetDate.setHours(pickerHours, pickerMinutes, 0, 0);
+
+			try {
+				await api.updatePost({
+					postId: editingPostId,
+					text: postText.trim(),
+					signed: authorsName,
+					closeComments: !commentsOnPost,
+					muteNotifications: !notifyFollowers,
+					markAsAds: adFromCreator,
+					attachmentsViewMode,
+					attachments: payloadAttachments,
+					scheduledAtUtc: targetDate.toISOString(),
+				});
+				setEditingPostId(null);
+				setPostText("");
+				setAttachedFiles([]);
+				localStorage.removeItem("vk_draft");
+				syncVkQueue(selectedTargetId);
+			} catch (err) {
+				setNotice({
+					title:
+						lang === "ru" ? "Ошибка сохранения" : "Save Error",
+					message: String(err),
+				});
+				if (
+					String(err).includes("не найден") ||
+					String(err).includes("not found")
+				) {
+					setEditingPostId(null);
+					setPostText("");
+					setAttachedFiles([]);
+				}
+			}
 			return;
 		}
 
@@ -727,6 +779,12 @@ export default function App() {
 
 	const executeDeletePost = async (post: PostItem) => {
 		const pid = post.id;
+		if (editingPostId === pid) {
+			setEditingPostId(null);
+			setPostText("");
+			setAttachedFiles([]);
+			localStorage.removeItem("vk_draft");
+		}
 		setQueue((prev: PostItem[]) => prev.filter((p) => p.id !== pid));
 		setHistoryPosts((prev: PostItem[]) => prev.filter((p) => p.id !== pid));
 
@@ -918,6 +976,7 @@ export default function App() {
 					viewMonth={viewMonth}
 					nextSlotDisplay={nextSlotDisplay}
 					selectedTargetId={selectedTargetId}
+					hasActiveToken={hasActiveToken}
 					isDraggingOver={isDraggingOver && !showBatchModal}
 					lang={lang}
 					onTextChange={setPostText}
@@ -1027,6 +1086,14 @@ export default function App() {
 								vkAttachmentString: a.vk_attachment_string,
 							})),
 						);
+						if (post.scheduled_at_utc) {
+							const d = new Date(post.scheduled_at_utc);
+							setSelectedDate(d);
+							setViewMonth(d);
+							setPickerHours(d.getHours());
+							setPickerMinutes(d.getMinutes());
+							setIsManualTime(true);
+						}
 						setIsRightPanelOpen(true);
 					}}
 					onOpenRevertModal={setRevertModalPost}
@@ -1035,14 +1102,6 @@ export default function App() {
 							selectedPatternId || (patterns[0]?.id ?? 1);
 						await api.rescheduleNextSlot(id, patId);
 						if (selectedTargetId) syncVkQueue(selectedTargetId);
-					}}
-					onOpenRescheduleModal={(post) => {
-						const d = new Date(post.scheduled_at_utc);
-						setRescheduleModalPost(post);
-						setRescheduleDate(d);
-						setRescheduleHours(d.getHours());
-						setRescheduleMinutes(d.getMinutes());
-						setRescheduleViewMonth(d);
 					}}
 					onDeletePost={handleDeleteRequest}
 					onOpenFullImage={setFullViewImage}

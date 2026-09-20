@@ -6,7 +6,6 @@ import {
 	Trash2,
 	Edit3,
 	Undo2,
-	Calendar,
 	RotateCcw,
 	ChevronDown,
 	ChevronUp,
@@ -19,10 +18,11 @@ import {
 	List,
 	CalendarDays,
 	FileText,
+	AlertCircle,
 } from "lucide-react";
 import { format } from "date-fns";
 import { PostItem } from "../types";
-import { translations, Lang } from "../services/i18n";
+import { translations, Lang, formatNormalizedError } from "../services/i18n";
 import { ContentCalendar } from "./ContentCalendar";
 
 interface QueuePanelProps {
@@ -49,7 +49,6 @@ interface QueuePanelProps {
 	onLoadToEditor: (post: PostItem) => void;
 	onOpenRevertModal: (post: PostItem) => void;
 	onRescheduleNextSlot: (id: number) => void;
-	onOpenRescheduleModal: (post: PostItem) => void;
 	onDeletePost: (post: PostItem) => void;
 	onOpenFullImage: (url: string) => void;
 	onLoadVkPhotos: (post: PostItem) => void;
@@ -80,7 +79,6 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
 	onLoadToEditor,
 	onOpenRevertModal,
 	onRescheduleNextSlot,
-	onOpenRescheduleModal,
 	onDeletePost,
 	onOpenFullImage,
 	onLoadVkPhotos,
@@ -145,6 +143,7 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
 					<button
 						type="button"
 						onClick={() => onSetTab("local")}
+						title={t.tabLocalQueue}
 						className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer"
 						style={{
 							backgroundColor:
@@ -164,6 +163,7 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
 					<button
 						type="button"
 						onClick={() => onSetTab("vk")}
+						title={t.tabVkQueue}
 						className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer"
 						style={{
 							backgroundColor:
@@ -183,6 +183,7 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
 					<button
 						type="button"
 						onClick={() => onSetTab("history")}
+						title={t.tabHistoryQueue}
 						className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer"
 						style={{
 							backgroundColor:
@@ -432,13 +433,19 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
 												className="text-[10px] px-2 py-0.5 rounded-full border text-center flex-shrink-0 truncate"
 												style={{
 													backgroundColor: isLocal
-														? "var(--bg-surface-sub)"
+														? post.status === "failed"
+															? "rgba(239, 68, 68, 0.15)"
+															: "var(--bg-surface-sub)"
 														: "var(--accent-glow)",
 													borderColor: isLocal
-														? "var(--border-light)"
+														? post.status === "failed"
+															? "rgba(239, 68, 68, 0.4)"
+															: "var(--border-light)"
 														: "var(--accent)",
 													color: isLocal
-														? "var(--text-app)"
+														? post.status === "failed"
+															? "#f87171"
+															: "var(--text-app)"
 														: "var(--accent)",
 												}}
 											>
@@ -494,9 +501,26 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
 									{!isExpanded && (
 										<div
 											className="px-3.5 pb-2.5 text-xs truncate opacity-80"
-											style={{ color: "var(--text-app)" }}
+											style={{
+												color:
+													post.status === "failed" &&
+													post.error_message
+														? "#f87171"
+														: "var(--text-app)",
+											}}
 										>
-											{post.text ? (
+											{post.status === "failed" &&
+											post.error_message ? (
+												<span className="flex items-center gap-1.5 truncate">
+													<AlertCircle className="h-3 w-3 flex-shrink-0" />
+													<span className="truncate">
+														{formatNormalizedError(
+															post.error_message,
+															lang,
+														)}
+													</span>
+												</span>
+											) : post.text ? (
 												post.text
 											) : (
 												<em className="opacity-50">
@@ -518,6 +542,32 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
 													"var(--bg-surface-sub)",
 											}}
 										>
+											{post.error_message && (
+												<div
+													className="p-3 rounded-xl border flex items-start gap-2.5 text-xs"
+													style={{
+														backgroundColor:
+															"rgba(239, 68, 68, 0.1)",
+														borderColor:
+															"rgba(239, 68, 68, 0.3)",
+														color: "#f87171",
+													}}
+												>
+													<AlertCircle className="h-4 w-4 flex-shrink-0 mt-0.5" />
+													<div className="space-y-0.5">
+														<div className="font-semibold">
+															{t.errorReason}
+														</div>
+														<div className="leading-relaxed opacity-95">
+															{formatNormalizedError(
+																post.error_message,
+																lang,
+															)}
+														</div>
+													</div>
+												</div>
+											)}
+
 											{post.text && (
 												<p
 													className="text-xs leading-relaxed whitespace-pre-wrap break-words"
@@ -582,28 +632,6 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
 															<Clock className="h-3 w-3" />
 															<span>
 																{t.nextSlot}
-															</span>
-														</button>
-
-														<button
-															type="button"
-															onClick={() =>
-																onOpenRescheduleModal(
-																	post,
-																)
-															}
-															className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-semibold hover:opacity-80 transition-all cursor-pointer"
-															style={{
-																backgroundColor:
-																	"var(--bg-surface)",
-																borderColor:
-																	"var(--border-light)",
-																color: "var(--text-app)",
-															}}
-														>
-															<Calendar className="h-3 w-3" />
-															<span>
-																{t.setTime}
 															</span>
 														</button>
 													</>

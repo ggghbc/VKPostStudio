@@ -12,6 +12,7 @@ use vk::client::VkClient;
 pub struct AppState {
     pub db: SqlitePool,
     pub active_vk: Arc<Mutex<Option<VkClient>>>,
+    pub transfer_lock: Arc<Mutex<()>>,
 }
 
 pub fn run() {
@@ -202,6 +203,7 @@ pub fn run() {
                 app_handle.manage(AppState {
                     db: pool,
                     active_vk: Arc::new(Mutex::new(vk_client)),
+                    transfer_lock: Arc::new(Mutex::new(())),
                 });
             });
             Ok(())

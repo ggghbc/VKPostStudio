@@ -949,25 +949,79 @@ pub async fn update_post(
     mark_as_ads: bool,
     attachments_view_mode: String,
     attachments: Vec<UpdateAttachmentInput>,
+    scheduled_at_utc: Option<String>,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    clean_post_disk_assets(post_id, &app, &state.db).await;
+    let post_exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM posts WHERE id = ?")
+        .bind(post_id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if post_exists == 0 {
+        return Err("Пост не найден (возможно, он был удален)".to_string());
+    }
+
+    if let Ok(app_dir) = app.path().app_data_dir() {
+        let thumbs_dir = app_dir.join("thumbnails");
+        let old_att_rows = sqlx::query("SELECT id, local_path FROM attachments WHERE post_id = ?")
+            .bind(post_id)
+            .fetch_all(&state.db)
+            .await
+            .unwrap_or_default();
+
+        let new_paths: std::collections::HashSet<String> = attachments
+            .iter()
+            .filter_map(|a| a.local_path.clone())
+            .collect();
+
+        for a in old_att_rows {
+            let att_id: i64 = a.get("id");
+            let thumb_path = thumbs_dir.join(format!("{}.thumb", att_id));
+            let _ = tokio::fs::remove_file(thumb_path).await;
+
+            let local_path: Option<String> = a.get("local_path");
+            if let Some(lp) = local_path {
+                if !new_paths.contains(&lp) && (lp.contains("pasted_images") || lp.contains("media")) {
+                    let _ = tokio::fs::remove_file(PathBuf::from(&lp)).await;
+                }
+            }
+        }
+    }
+
     let mut tx = state.db.begin().await.map_err(|e| e.to_string())?;
 
-    sqlx::query(
-        "UPDATE posts SET text = ?, signed = ?, close_comments = ?, mute_notifications = ?, mark_as_ads = ?, attachments_view_mode = ? WHERE id = ?"
-    )
-    .bind(&text)
-    .bind(if signed { 1 } else { 0 })
-    .bind(if close_comments { 1 } else { 0 })
-    .bind(if mute_notifications { 1 } else { 0 })
-    .bind(if mark_as_ads { 1 } else { 0 })
-    .bind(&attachments_view_mode)
-    .bind(post_id)
-    .execute(&mut *tx)
-    .await
-    .map_err(|e| e.to_string())?;
+    if let Some(ref sched) = scheduled_at_utc {
+        sqlx::query(
+            "UPDATE posts SET text = ?, signed = ?, close_comments = ?, mute_notifications = ?, mark_as_ads = ?, attachments_view_mode = ?, scheduled_at_utc = ?, status = CASE WHEN status = 'failed' THEN 'queued' ELSE status END, error_message = CASE WHEN status = 'failed' THEN NULL ELSE error_message END WHERE id = ?"
+        )
+        .bind(&text)
+        .bind(if signed { 1 } else { 0 })
+        .bind(if close_comments { 1 } else { 0 })
+        .bind(if mute_notifications { 1 } else { 0 })
+        .bind(if mark_as_ads { 1 } else { 0 })
+        .bind(&attachments_view_mode)
+        .bind(sched)
+        .bind(post_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?;
+    } else {
+        sqlx::query(
+            "UPDATE posts SET text = ?, signed = ?, close_comments = ?, mute_notifications = ?, mark_as_ads = ?, attachments_view_mode = ?, status = CASE WHEN status = 'failed' THEN 'queued' ELSE status END, error_message = CASE WHEN status = 'failed' THEN NULL ELSE error_message END WHERE id = ?"
+        )
+        .bind(&text)
+        .bind(if signed { 1 } else { 0 })
+        .bind(if close_comments { 1 } else { 0 })
+        .bind(if mute_notifications { 1 } else { 0 })
+        .bind(if mark_as_ads { 1 } else { 0 })
+        .bind(&attachments_view_mode)
+        .bind(post_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?;
+    }
 
     sqlx::query("DELETE FROM attachments WHERE post_id = ?")
         .bind(post_id)
@@ -1422,6 +1476,11 @@ pub async fn start_transfer_pipeline(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
+    let lock_clone = state.transfer_lock.clone();
+    let permit = lock_clone.try_lock_owned().map_err(|_| {
+        "Процесс переноса постов уже запущен. Пожалуйста, дождитесь его завершения.".to_string()
+    })?;
+
     let token_row = sqlx::query(
         "SELECT a.id, a.token FROM accounts a JOIN targets t ON t.account_id = a.id WHERE t.id = ?",
     )
@@ -1438,6 +1497,7 @@ pub async fn start_transfer_pipeline(
 
     let db = state.db.clone();
     tokio::spawn(async move {
+        let _permit = permit;
         if let Err(e) = TransferWorker::run_transfer(app, db, vk, target_id).await {
             eprintln!("Transfer worker error: {:?}", e);
         }

@@ -55,6 +55,7 @@ import {
 } from "../types";
 import { translations, Lang } from "../services/i18n";
 import { CustomSelect } from "./CustomSelect";
+import { CyclicTimeInput } from "./CyclicTimeInput";
 
 // Внутреннее всплывающее окно поверх всех окон
 export const NoticeModal: React.FC<{
@@ -2436,46 +2437,17 @@ export const RescheduleModal: React.FC<{
 						{lang === "ru" ? "Время (24h):" : "Time (24h):"}
 					</span>
 					<div className="flex items-center gap-1 font-mono">
-						<select
+						<CyclicTimeInput
 							value={hours}
-							onChange={(e) =>
-								onHoursChange(Number(e.target.value))
-							}
-							className="border rounded-lg px-2 py-1 text-xs focus:outline-none"
-							style={{
-								backgroundColor: "var(--bg-surface-sub)",
-								color: "var(--text-app)",
-								borderColor: "var(--border-light)",
-							}}
-						>
-							{Array.from({ length: 24 }).map((_, i) => (
-								<option key={i} value={i}>
-									{i.toString().padStart(2, "0")}
-								</option>
-							))}
-						</select>
-						<span>:</span>
-						<select
+							max={23}
+							onChange={onHoursChange}
+						/>
+						<span className="font-bold">:</span>
+						<CyclicTimeInput
 							value={minutes}
-							onChange={(e) =>
-								onMinutesChange(Number(e.target.value))
-							}
-							className="border rounded-lg px-2 py-1 text-xs focus:outline-none"
-							style={{
-								backgroundColor: "var(--bg-surface-sub)",
-								color: "var(--text-app)",
-								borderColor: "var(--border-light)",
-							}}
-						>
-							{Array.from({ length: 12 }).map((_, i) => {
-								const m = i * 5;
-								return (
-									<option key={m} value={m}>
-										{m.toString().padStart(2, "0")}
-									</option>
-								);
-							})}
-						</select>
+							max={59}
+							onChange={onMinutesChange}
+						/>
 					</div>
 				</div>
 

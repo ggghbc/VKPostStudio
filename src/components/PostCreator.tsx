@@ -35,6 +35,7 @@ import { ru } from "date-fns/locale";
 import { Pattern, FilePreview } from "../types";
 import { translations, Lang } from "../services/i18n";
 import { CustomSelect } from "./CustomSelect";
+import { CyclicTimeInput } from "./CyclicTimeInput";
 
 interface PostCreatorProps {
 	editingPostId: number | null;
@@ -57,6 +58,7 @@ interface PostCreatorProps {
 	viewMonth: Date;
 	nextSlotDisplay: string;
 	selectedTargetId: number | null;
+	hasActiveToken: boolean;
 	isDraggingOver: boolean;
 	lang: Lang;
 	onTextChange: (text: string) => void;
@@ -105,6 +107,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 	viewMonth,
 	nextSlotDisplay,
 	selectedTargetId,
+	hasActiveToken,
 	isDraggingOver,
 	lang,
 	onTextChange,
@@ -623,7 +626,6 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 				)}
 			</div>
 
-			{!editingPostId && (
 				<div
 					className="p-2.5 rounded-2xl border flex flex-col gap-2 text-xs select-none relative mb-2 flex-shrink-0"
 					ref={calendarRef}
@@ -642,44 +644,46 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 								className="font-medium"
 								style={{ color: "var(--text-app)" }}
 							>
-								{t.manualTimeToggle}
+								{editingPostId ? t.pubTime : t.manualTimeToggle}
 							</span>
 						</div>
-						<label className="relative inline-flex items-center cursor-pointer">
-							<input
-								type="checkbox"
-								checked={isManualTime}
-								onChange={(e) =>
-									onToggleManualTime(e.target.checked)
-								}
-								className="sr-only peer"
-							/>
-							<div
-								className="w-8 h-4 rounded-full border transition-all relative flex items-center px-0.5"
-								style={{
-									backgroundColor: isManualTime
-										? "var(--btn-primary-bg)"
-										: "var(--bg-surface)",
-									borderColor: "var(--border-light)",
-								}}
-							>
+						{!editingPostId && (
+							<label className="relative inline-flex items-center cursor-pointer">
+								<input
+									type="checkbox"
+									checked={isManualTime}
+									onChange={(e) =>
+										onToggleManualTime(e.target.checked)
+									}
+									className="sr-only peer"
+								/>
 								<div
-									className={`h-3 w-3 rounded-full transition-transform ${
-										isManualTime
-											? "translate-x-3.5 shadow-sm"
-											: ""
-									}`}
+									className="w-8 h-4 rounded-full border transition-all relative flex items-center px-0.5"
 									style={{
 										backgroundColor: isManualTime
-											? "var(--btn-primary-text)"
-											: "var(--text-dim)",
+											? "var(--btn-primary-bg)"
+											: "var(--bg-surface)",
+										borderColor: "var(--border-light)",
 									}}
-								/>
-							</div>
-						</label>
+								>
+									<div
+										className={`h-3 w-3 rounded-full transition-transform ${
+											isManualTime
+												? "translate-x-3.5 shadow-sm"
+												: ""
+										}`}
+										style={{
+											backgroundColor: isManualTime
+												? "var(--btn-primary-text)"
+												: "var(--text-dim)",
+										}}
+									/>
+								</div>
+							</label>
+						)}
 					</div>
 
-					{isManualTime && (
+					{(isManualTime || Boolean(editingPostId)) && (
 						<div
 							className="pt-2 border-t flex items-center justify-between gap-3"
 							style={{ borderColor: "var(--border-light)" }}
@@ -709,7 +713,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 						</div>
 					)}
 
-					{isCalendarOpen && isManualTime && (
+					{isCalendarOpen && (isManualTime || Boolean(editingPostId)) && (
 						<div
 							className="absolute bottom-full left-0 mb-2 w-72 border rounded-2xl shadow-2xl p-3.5 z-50"
 							style={{
@@ -734,9 +738,13 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 												subMonths(viewMonth, 1),
 											)
 										}
-										className="p-1 rounded-lg border hover:opacity-80 cursor-pointer"
+										className="p-1 rounded-lg border hover:opacity-80 transition-opacity cursor-pointer"
+										style={{
+											borderColor: "var(--border-light)",
+											color: "var(--text-app)",
+										}}
 									>
-										<CL className="h-4 w-4" />
+										<CL className="h-3.5 w-3.5" />
 									</button>
 									<button
 										type="button"
@@ -745,33 +753,32 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 												addMonths(viewMonth, 1),
 											)
 										}
-										className="p-1 rounded-lg border hover:opacity-80 cursor-pointer"
+										className="p-1 rounded-lg border hover:opacity-80 transition-opacity cursor-pointer"
+										style={{
+											borderColor: "var(--border-light)",
+											color: "var(--text-app)",
+										}}
 									>
-										<CR className="h-4 w-4" />
+										<CR className="h-3.5 w-3.5" />
 									</button>
 								</div>
 							</div>
 
-							<div
-								className="grid grid-cols-7 gap-1 text-center text-[10px] font-medium mb-1"
-								style={{ color: "var(--text-dim)" }}
-							>
-								<span>Пн</span>
-								<span>Вт</span>
-								<span>Ср</span>
-								<span>Чт</span>
-								<span>Пт</span>
-								<span className="opacity-70">Сб</span>
-								<span className="opacity-70">Вс</span>
+							<div className="grid grid-cols-7 gap-1 text-center text-[10px] mb-1 font-semibold opacity-60">
+								{["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"].map(
+									(d) => (
+										<div key={d}>{d}</div>
+									),
+								)}
 							</div>
 
-							<div className="grid grid-cols-7 gap-1 text-center text-xs">
+							<div className="grid grid-cols-7 gap-1">
 								{daysInCal.map((day, idx) => {
-									const isSelected = isSameDay(
+									const isCurrent = isSameDay(
 										day,
 										selectedDate,
 									);
-									const isCurrentMonth =
+									const isMonth =
 										day.getMonth() === viewMonth.getMonth();
 									return (
 										<button
@@ -780,18 +787,14 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 											onClick={() =>
 												onSetSelectedDate(day)
 											}
-											className={`h-7 w-7 mx-auto rounded-lg flex items-center justify-center font-mono text-[11px] transition-colors cursor-pointer ${
-												isSelected
-													? "shadow-md font-bold"
-													: isCurrentMonth
-														? "hover:opacity-80"
-														: "opacity-30"
+											className={`h-7 w-7 rounded-lg text-xs flex items-center justify-center transition-all cursor-pointer ${
+												!isMonth ? "opacity-30" : ""
 											}`}
 											style={{
-												backgroundColor: isSelected
+												backgroundColor: isCurrent
 													? "var(--btn-primary-bg)"
 													: "transparent",
-												color: isSelected
+												color: isCurrent
 													? "var(--btn-primary-text)"
 													: "var(--text-app)",
 											}}
@@ -815,76 +818,17 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 										: "Time (24h):"}
 								</span>
 								<div className="flex items-center gap-1 font-mono">
-									<select
+									<CyclicTimeInput
 										value={pickerHours}
-										onChange={(e) =>
-											onSetPickerHours(
-												Number(e.target.value),
-											)
-										}
-										className="border rounded-lg px-2 py-1 text-xs focus:outline-none"
-										style={{
-											backgroundColor:
-												"var(--bg-surface-sub)",
-											color: "var(--text-app)",
-											borderColor: "var(--border-light)",
-										}}
-									>
-										{Array.from({ length: 24 }).map(
-											(_, i) => (
-												<option
-													key={i}
-													value={i}
-													style={{
-														backgroundColor:
-															"var(--bg-surface)",
-														color: "var(--text-app)",
-													}}
-												>
-													{i
-														.toString()
-														.padStart(2, "0")}
-												</option>
-											),
-										)}
-									</select>
-									<span>:</span>
-									<select
+										max={23}
+										onChange={onSetPickerHours}
+									/>
+									<span className="font-bold">:</span>
+									<CyclicTimeInput
 										value={pickerMinutes}
-										onChange={(e) =>
-											onSetPickerMinutes(
-												Number(e.target.value),
-											)
-										}
-										className="border rounded-lg px-2 py-1 text-xs focus:outline-none"
-										style={{
-											backgroundColor:
-												"var(--bg-surface-sub)",
-											color: "var(--text-app)",
-											borderColor: "var(--border-light)",
-										}}
-									>
-										{Array.from({ length: 12 }).map(
-											(_, i) => {
-												const m = i * 5;
-												return (
-													<option
-														key={m}
-														value={m}
-														style={{
-															backgroundColor:
-																"var(--bg-surface)",
-															color: "var(--text-app)",
-														}}
-													>
-														{m
-															.toString()
-															.padStart(2, "0")}
-													</option>
-												);
-											},
-										)}
-									</select>
+										max={59}
+										onChange={onSetPickerMinutes}
+									/>
 								</div>
 							</div>
 
@@ -905,7 +849,6 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 						</div>
 					)}
 				</div>
-			)}
 
 			{/* Кнопка добавления / сохранения */}
 			<div
@@ -930,14 +873,23 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 				<button
 					type="button"
 					onClick={onSavePost}
-					disabled={!selectedTargetId}
-					className="flex-1 flex items-center justify-center gap-2 rounded-xl py-3 text-xs sm:text-sm font-bold shadow-lg transition-all active:scale-[0.99] disabled:opacity-50 disabled:pointer-events-none cursor-pointer"
+					disabled={!hasActiveToken || !selectedTargetId}
+					className="flex-1 flex items-center justify-center gap-2 rounded-xl py-3 px-3 text-xs sm:text-sm font-bold shadow-lg transition-all active:scale-[0.99] disabled:opacity-50 disabled:pointer-events-none cursor-pointer text-center"
 					style={{
-						backgroundColor: "var(--btn-primary-bg)",
-						color: "var(--btn-primary-text)",
+						backgroundColor: hasActiveToken
+							? "var(--btn-primary-bg)"
+							: "var(--bg-surface-sub)",
+						color: hasActiveToken
+							? "var(--btn-primary-text)"
+							: "var(--text-muted)",
+						borderColor: hasActiveToken
+							? "transparent"
+							: "var(--border-light)",
 					}}
 				>
-					{editingPostId ? (
+					{!hasActiveToken ? (
+						<span>{t.noActiveToken}</span>
+					) : editingPostId ? (
 						<>
 							<Save className="h-4 w-4" />
 							<span>
