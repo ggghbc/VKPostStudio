@@ -72,8 +72,22 @@ export default function App() {
 
 	const [patterns, setPatterns] = useState<Pattern[]>([]);
 	const [selectedPatternId, setSelectedPatternId] = useState<number | null>(
-		null,
+		() => {
+			const saved = localStorage.getItem("vk_selected_pattern");
+			return saved ? Number(saved) : null;
+		},
 	);
+
+	useEffect(() => {
+		if (selectedPatternId !== null) {
+			localStorage.setItem(
+				"vk_selected_pattern",
+				selectedPatternId.toString(),
+			);
+		} else {
+			localStorage.removeItem("vk_selected_pattern");
+		}
+	}, [selectedPatternId]);
 
 	const [queue, setQueue] = useState<PostItem[]>([]);
 	const [historyPosts, setHistoryPosts] = useState<PostItem[]>([]);
@@ -531,8 +545,23 @@ export default function App() {
 		try {
 			const ptrns = await api.getPatterns();
 			setPatterns(ptrns);
-			if (ptrns.length > 0)
-				setSelectedPatternId((prev) => prev ?? ptrns[0].id);
+			if (ptrns.length > 0) {
+				setSelectedPatternId((prev) => {
+					const saved = localStorage.getItem("vk_selected_pattern");
+					const savedId = saved ? Number(saved) : null;
+					const targetId = prev ?? savedId;
+					const match = ptrns.find((p) => p.id === targetId);
+					const chosen = match ? match.id : ptrns[0].id;
+					localStorage.setItem(
+						"vk_selected_pattern",
+						chosen.toString(),
+					);
+					return chosen;
+				});
+			} else {
+				setSelectedPatternId(null);
+				localStorage.removeItem("vk_selected_pattern");
+			}
 		} catch (e) {
 			console.error(e);
 		}
