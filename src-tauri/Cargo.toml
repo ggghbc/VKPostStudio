@@ -1,6 +1,7 @@
 [package]
 name = "vk-post-studio"
-version = "0.1.0"
+description = "VK Post Studio"
+version = "1.0.0"
 edition = "2021"
 
 [lib]
@@ -31,3 +32,5 @@ keyring = "4.2.0"
 urlencoding = "2.1.3"
 url = "2.5.8"
 open = "5.4.4"
+trash = "5.2.9"
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "webp", "bmp"] }

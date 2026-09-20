@@ -35,6 +35,8 @@ export interface AttachmentItem {
 	local_path?: string;
 	vk_attachment_string?: string;
 	thumb_data?: string;
+	preview_url?: string | null;
+	full_url?: string | null;
 }
 
 export interface PostItem {

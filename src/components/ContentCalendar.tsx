@@ -9,6 +9,7 @@ import {
 	endOfWeek,
 	eachDayOfInterval,
 	isSameMonth,
+	isSameDay,
 } from "date-fns";
 import { ru } from "date-fns/locale";
 import { ChevronLeft, ChevronRight, Clock } from "lucide-react";
@@ -34,8 +35,9 @@ export const ContentCalendar: React.FC<ContentCalendarProps> = ({
 	const days = eachDayOfInterval({ start: calStart, end: calEnd });
 
 	const getPostsForDay = (day: Date) => {
-		const dayStr = format(day, "yyyy-MM-dd");
-		return posts.filter((p) => p.scheduled_at_utc.startsWith(dayStr));
+		return posts.filter((p) =>
+			isSameDay(new Date(p.scheduled_at_utc), day),
+		);
 	};
 
 	return (
@@ -55,6 +57,7 @@ export const ContentCalendar: React.FC<ContentCalendarProps> = ({
 				</span>
 				<div className="flex items-center gap-1">
 					<button
+						type="button"
 						onClick={() => onMonthChange(subMonths(month, 1))}
 						className="p-1 rounded-lg border hover:opacity-80 transition-colors cursor-pointer"
 						style={{
@@ -66,6 +69,7 @@ export const ContentCalendar: React.FC<ContentCalendarProps> = ({
 						<ChevronLeft className="h-4 w-4" />
 					</button>
 					<button
+						type="button"
 						onClick={() => onMonthChange(addMonths(month, 1))}
 						className="p-1 rounded-lg border hover:opacity-80 transition-colors cursor-pointer"
 						style={{

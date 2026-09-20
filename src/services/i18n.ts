@@ -122,6 +122,7 @@ export interface TranslationSchema {
 	scanWallBtn: string;
 	loadMoreBtn: string;
 	wallPostBadge: string;
+	mediaFiles: string;
 }
 
 export const translations: Record<Lang, TranslationSchema> = {
@@ -252,6 +253,7 @@ export const translations: Record<Lang, TranslationSchema> = {
 		scanWallBtn: "Сканировать стену",
 		loadMoreBtn: "Загрузить ещё",
 		wallPostBadge: "Стена ВК",
+		mediaFiles: "медиа",
 	},
 	en: {
 		appTitle: "VK Post Studio",
@@ -378,5 +380,6 @@ export const translations: Record<Lang, TranslationSchema> = {
 		scanWallBtn: "Scan Wall",
 		loadMoreBtn: "Load More",
 		wallPostBadge: "VK Wall",
+		mediaFiles: "media",
 	},
 };

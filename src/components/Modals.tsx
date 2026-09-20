@@ -44,7 +44,7 @@ import {
 	RefreshCw,
 } from "lucide-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { api } from "../services/api";
 import {
 	PostItem,
 	Theme,
@@ -143,7 +143,7 @@ export const SettingsModal: React.FC<{
 
 	const handleOpenExternal = async (url: string) => {
 		try {
-			await openUrl(url);
+			await api.openExternalUrl(url);
 		} catch {
 			window.open(url, "_blank");
 		}
@@ -2456,13 +2456,16 @@ export const LightboxModal: React.FC<{
 	return (
 		<div
 			onClick={onClose}
-			className="fixed inset-0 bg-black/90 backdrop-blur-md flex items-center justify-center p-6 z-50 cursor-zoom-out animate-in fade-in duration-150"
+			className="fixed inset-0 bg-black/90 backdrop-blur-md flex items-center justify-center p-6 z-[9999] cursor-zoom-out animate-in fade-in duration-150"
 		>
-			<div className="relative max-w-5xl max-h-[90vh] flex items-center justify-center">
+			<div
+				className="relative max-w-5xl max-h-[90vh] flex items-center justify-center"
+				onClick={(e) => e.stopPropagation()}
+			>
 				<img
 					src={url}
 					alt="Full preview"
-					className="max-w-full max-h-[90vh] object-contain rounded-xl shadow-2xl"
+					className="max-w-full max-h-[90vh] min-w-[320px] object-contain rounded-xl shadow-2xl"
 				/>
 				<button
 					onClick={onClose}

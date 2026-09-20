@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Context, Result};
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT_LANGUAGE, USER_AGENT};
 use reqwest::{multipart, Client};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::time::Duration;
 
@@ -53,12 +53,21 @@ struct GroupsGetResponse {
     items: Vec<GroupItem>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VkPhotoPreview {
+    pub id: i64,
+    pub owner_id: i64,
+    pub preview_url: String,
+    pub full_url: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct VkPostponedItem {
     pub id: i64,
     pub date: i64,
     pub text: Option<String>,
     pub attachments_count: i64,
+    pub photos: Vec<VkPhotoPreview>,
 }
 
 #[derive(Debug, Clone)]
@@ -255,11 +264,57 @@ impl VkClient {
             let id = item.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
             let date = item.get("date").and_then(|v| v.as_i64()).unwrap_or(0);
             let text = item.get("text").and_then(|v| v.as_str()).map(|s| s.to_string());
-            let att_count = item
-                .get("attachments")
-                .and_then(|v| v.as_array())
-                .map(|a| a.len() as i64)
-                .unwrap_or(0);
+
+            let mut photos = Vec::new();
+            if let Some(atts) = item.get("attachments").and_then(|v| v.as_array()) {
+                for att in atts {
+                    if att.get("type").and_then(|v| v.as_str()) == Some("photo") {
+                        if let Some(photo) = att.get("photo") {
+                            let pid = photo.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
+                            let powner = photo.get("owner_id").and_then(|v| v.as_i64()).unwrap_or(0);
+                            if let Some(sizes) = photo.get("sizes").and_then(|v| v.as_array()) {
+                                // Полноразмерный оригинал фото в максимальном разрешении
+                                let full_url = sizes
+                                    .last()
+                                    .and_then(|s| s.get("url"))
+                                    .and_then(|u| u.as_str())
+                                    .unwrap_or("")
+                                    .to_string();
+
+                                // Превью оптимального качества (x/y/z) для ленты
+                                let preview_url = sizes
+                                    .iter()
+                                    .find(|s| {
+                                        matches!(s.get("type").and_then(|v| v.as_str()), Some("x" | "y" | "z"))
+                                    })
+                                    .or_else(|| sizes.last())
+                                    .and_then(|s| s.get("url"))
+                                    .and_then(|u| u.as_str())
+                                    .unwrap_or(&full_url)
+                                    .to_string();
+
+                                if !full_url.is_empty() {
+                                    photos.push(VkPhotoPreview {
+                                        id: pid,
+                                        owner_id: powner,
+                                        preview_url: if preview_url.is_empty() { full_url.clone() } else { preview_url },
+                                        full_url,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            let att_count = if photos.is_empty() {
+                item.get("attachments")
+                    .and_then(|v| v.as_array())
+                    .map(|a| a.len() as i64)
+                    .unwrap_or(0)
+            } else {
+                photos.len() as i64
+            };
 
             if id > 0 && date > 0 {
                 result.push(VkPostponedItem {
@@ -267,6 +322,7 @@ impl VkClient {
                     date,
                     text,
                     attachments_count: att_count,
+                    photos,
                 });
             }
         }
@@ -311,6 +367,7 @@ impl VkClient {
                     date,
                     text,
                     attachments_count: att_count,
+                    photos: Vec::new(),
                 });
             }
         }
@@ -361,7 +418,24 @@ impl VkClient {
             .unwrap_or("jpg")
             .to_lowercase();
 
-        let safe_name = format!("upload_{}.{}", rand::random::<u32>(), ext);
+        let (upload_bytes, mime_type, safe_ext) = if ext == "bmp" || ext == "tiff" || ext == "tif" {
+            let dyn_img = image::load_from_memory(&file_bytes)
+                .context("Не удалось декодировать изображение для конвертации")?;
+            let mut buf = std::io::Cursor::new(Vec::new());
+            dyn_img.write_to(&mut buf, image::ImageFormat::Jpeg)
+                .context("Ошибка перекодирования в JPEG")?;
+            (buf.into_inner(), "image/jpeg", "jpg")
+        } else {
+            let m = match ext.as_str() {
+                "png" => "image/png",
+                "webp" => "image/webp",
+                "gif" => "image/gif",
+                _ => "image/jpeg",
+            };
+            (file_bytes, m, ext.as_str())
+        };
+
+        let safe_name = format!("upload_{}.{}", rand::random::<u32>(), safe_ext);
         let is_group = target_owner_id < 0;
         let group_id_str = target_owner_id.abs().to_string();
 
@@ -378,14 +452,7 @@ impl VkClient {
             .await
             .context("Ошибка при получении адреса сервера загрузки фото")?;
 
-        let mime_type = match ext.as_str() {
-            "png" => "image/png",
-            "webp" => "image/webp",
-            "gif" => "image/gif",
-            _ => "image/jpeg",
-        };
-
-        let part = multipart::Part::bytes(file_bytes)
+        let part = multipart::Part::bytes(upload_bytes)
             .file_name(safe_name)
             .mime_str(mime_type)?;
 

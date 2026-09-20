@@ -88,14 +88,17 @@ impl TransferWorker {
                 .map_err(|e| anyhow!("Неверный формат даты: {}", e))?;
 
             let now = Utc::now();
-            if scheduled_at <= (now + chrono::Duration::seconds(60)) {
-                sqlx::query("UPDATE posts SET status = 'failed', error_message = ? WHERE id = ?")
-                    .bind("Время слота уже наступило или наступит менее чем через 1 минуту.")
+            let effective_scheduled_at = if scheduled_at <= (now + chrono::Duration::seconds(60)) {
+                let shifted = now + chrono::Duration::minutes(2);
+                sqlx::query("UPDATE posts SET scheduled_at_utc = ? WHERE id = ?")
+                    .bind(shifted.to_rfc3339())
                     .bind(post_id)
                     .execute(db)
                     .await?;
-                continue;
-            }
+                shifted
+            } else {
+                scheduled_at
+            };
 
             let _ = app.emit("transfer-progress", serde_json::json!({
                 "current": idx + 1,
@@ -141,7 +144,7 @@ impl TransferWorker {
 
                     match vk.upload_wall_photo(owner_id, &path).await {
                         Ok(vk_string) => {
-                            sqlx::query(
+                            let _ = sqlx::query(
                                 "UPDATE attachments SET 
                                     upload_status = 'uploaded', 
                                     vk_attachment_string = ? 
@@ -150,18 +153,17 @@ impl TransferWorker {
                             .bind(&vk_string)
                             .bind(att_id)
                             .execute(db)
-                            .await?;
+                            .await;
 
                             vk_attachment_strings.push(vk_string);
                         }
                         Err(e) => {
                             let formatted = format_vk_error(&e.to_string());
 
-                            sqlx::query("UPDATE attachments SET upload_status = 'error', error_message = ? WHERE id = ?")
-                                .bind(&formatted)
+                            let _ = sqlx::query("UPDATE attachments SET upload_status = 'error' WHERE id = ?")
                                 .bind(att_id)
                                 .execute(db)
-                                .await?;
+                                .await;
 
                             sqlx::query("UPDATE posts SET status = 'failed', error_message = ? WHERE id = ?")
                                 .bind(&formatted)
@@ -185,7 +187,7 @@ impl TransferWorker {
                     owner_id,
                     &text,
                     &vk_attachment_strings,
-                    scheduled_at.timestamp(),
+                    effective_scheduled_at.timestamp(),
                     from_group,
                     signed,
                     close_comments,

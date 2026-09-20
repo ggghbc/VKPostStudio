@@ -17,6 +17,7 @@ export const api = {
 	savePastedImage: (bytes: number[], ext: string) =>
 		invoke<string>("save_pasted_image_bytes", { bytes, ext }),
 	openBrowserAuth: () => invoke("open_vk_auth_browser"),
+	openExternalUrl: (url: string) => invoke("open_external_url", { url }),
 
 	getAccounts: () => invoke<Account[]>("get_accounts"),
 	switchAccount: (accountId: number) =>
@@ -50,7 +51,6 @@ export const api = {
 		invoke<PostItem[]>("get_queue", { targetId }),
 	getHistory: (targetId: number) =>
 		invoke<PostItem[]>("get_post_history", { targetId }),
-	getAllPosts: () => invoke<PostItem[]>("get_all_posts"),
 	fetchLiveWallPosts: (targetId: number, offset: number) =>
 		invoke<LiveWallPostItem[]>("fetch_live_wall_posts", {
 			targetId,

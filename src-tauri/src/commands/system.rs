@@ -1,4 +1,5 @@
 use crate::AppState;
+use sqlx::AssertSqlSafe;
 use std::path::PathBuf;
 use std::time::SystemTime;
 use tauri::{AppHandle, Manager, State};
@@ -13,16 +14,8 @@ fn encode_base64(bytes: &[u8]) -> String {
         let triple = (b0 << 16) | (b1 << 8) | b2;
         res.push(CHARSET[(triple >> 18) & 0x3F] as char);
         res.push(CHARSET[(triple >> 12) & 0x3F] as char);
-        if chunk.len() > 1 {
-            res.push(CHARSET[(triple >> 6) & 0x3F] as char);
-        } else {
-            res.push('=');
-        }
-        if chunk.len() > 2 {
-            res.push(CHARSET[triple & 0x3F] as char);
-        } else {
-            res.push('=');
-        }
+        if chunk.len() > 1 { res.push(CHARSET[(triple >> 6) & 0x3F] as char); } else { res.push('='); }
+        if chunk.len() > 2 { res.push(CHARSET[triple & 0x3F] as char); } else { res.push('='); }
     }
     res
 }
@@ -39,7 +32,14 @@ pub fn make_db_backup(app: &AppHandle) -> Result<PathBuf, String> {
     let now_str = chrono::Local::now().format("%Y-%m-%d_%H-%M-%S").to_string();
     let target_file = backups_dir.join(format!("studio_backup_{}.sqlite", now_str));
 
-    std::fs::copy(&db_path, &target_file).map_err(|e| e.to_string())?;
+    if let Some(state) = app.try_state::<AppState>() {
+        let query_str = format!("VACUUM INTO '{}'", target_file.to_string_lossy().replace('\'', "''"));
+        let _ = tauri::async_runtime::block_on(async {
+            sqlx::query(AssertSqlSafe(&*query_str)).execute(&state.db).await
+        });
+    } else {
+        std::fs::copy(&db_path, &target_file).map_err(|e| e.to_string())?;
+    }
 
     if let Ok(entries) = std::fs::read_dir(&backups_dir) {
         let mut list: Vec<_> = entries.flatten().collect();
@@ -56,9 +56,21 @@ pub fn make_db_backup(app: &AppHandle) -> Result<PathBuf, String> {
 }
 
 #[tauri::command]
-pub async fn backup_database(app: AppHandle) -> Result<String, String> {
-    let p = make_db_backup(&app)?;
-    Ok(p.to_string_lossy().to_string())
+pub async fn backup_database(app: AppHandle, state: State<'_, AppState>) -> Result<String, String> {
+    let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let backups_dir = app_dir.join("backups");
+    tokio::fs::create_dir_all(&backups_dir).await.map_err(|e| e.to_string())?;
+
+    let now_str = chrono::Local::now().format("%Y-%m-%d_%H-%M-%S").to_string();
+    let target_file = backups_dir.join(format!("studio_backup_{}.sqlite", now_str));
+
+    let query_str = format!("VACUUM INTO '{}'", target_file.to_string_lossy().replace('\'', "''"));
+    sqlx::query(AssertSqlSafe(&*query_str))
+        .execute(&state.db)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(target_file.to_string_lossy().to_string())
 }
 
 #[tauri::command]
@@ -110,10 +122,55 @@ pub async fn save_pasted_image_bytes(bytes: Vec<u8>, ext: String, app: AppHandle
 }
 
 #[tauri::command]
-pub async fn clear_database_except_tokens(state: State<'_, AppState>) -> Result<(), String> {
+pub async fn clear_database_except_tokens(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     let mut tx = state.db.begin().await.map_err(|e| e.to_string())?;
     sqlx::query("DELETE FROM attachments").execute(&mut *tx).await.map_err(|e| e.to_string())?;
     sqlx::query("DELETE FROM posts").execute(&mut *tx).await.map_err(|e| e.to_string())?;
     tx.commit().await.map_err(|e| e.to_string())?;
+
+    if let Ok(app_dir) = app.path().app_data_dir() {
+        let thumbs_dir = app_dir.join("thumbnails");
+        if let Ok(mut entries) = tokio::fs::read_dir(&thumbs_dir).await {
+            while let Ok(Some(entry)) = entries.next_entry().await {
+                let _ = tokio::fs::remove_file(entry.path()).await;
+            }
+        }
+        let pasted_dir = app_dir.join("pasted_images");
+        if let Ok(mut entries) = tokio::fs::read_dir(&pasted_dir).await {
+            while let Ok(Some(entry)) = entries.next_entry().await {
+                let _ = tokio::fs::remove_file(entry.path()).await;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub fn open_external_url(url: String) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        let mut cmd = std::process::Command::new("cmd");
+        cmd.arg("/C");
+        // Принудительно берем URL в кавычки через raw_arg, чтобы cmd.exe не разбивал строку по символам &
+        cmd.raw_arg(format!("start \"\" \"{}\"", url));
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW (скрывает мигающее окно консоли)
+        cmd.spawn().map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open")
+            .arg(&url)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let _ = std::process::Command::new("xdg-open")
+            .arg(&url)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
     Ok(())
 }

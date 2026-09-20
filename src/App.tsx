@@ -34,8 +34,9 @@ import { Lang, translations } from "./services/i18n";
 import { format } from "date-fns";
 
 export default function App() {
+	// BUG-11: Дефолтная тема 'pastel' вместо несуществующей 'classic'
 	const [theme, setTheme] = useState<Theme>(
-		() => (localStorage.getItem("vk_theme") as Theme) || "classic",
+		() => (localStorage.getItem("vk_theme") as Theme) || "pastel",
 	);
 	const [lang, setLang] = useState<Lang>(
 		() => (localStorage.getItem("vk_lang") as Lang) || "ru",
@@ -118,7 +119,6 @@ export default function App() {
 		null,
 	);
 
-	// Пакетная генерация
 	const [showBatchModal, setShowBatchModal] = useState(false);
 	const showBatchModalRef = useRef(showBatchModal);
 	showBatchModalRef.current = showBatchModal;
@@ -128,13 +128,13 @@ export default function App() {
 
 	const [showLivePreviewModal, setShowLivePreviewModal] = useState(false);
 
-	// Просмотр стены сообщества ВК
+	// Стена сообщества
 	const [showWallModal, setShowWallModal] = useState(false);
 	const [wallPosts, setWallPosts] = useState<LiveWallPostItem[]>([]);
 	const [isSyncingWall, setIsSyncingWall] = useState(false);
 	const [wallOffset, setWallOffset] = useState<number>(0);
 
-	// Просмотр поста из календаря
+	// Карточка поста из календаря
 	const [calendarDetailPost, setCalendarDetailPost] =
 		useState<PostItem | null>(null);
 
@@ -143,19 +143,16 @@ export default function App() {
 		message: string;
 	} | null>(null);
 
-	// Сессионное подтверждение удаления
 	const [skipDeleteConfirmSession, setSkipDeleteConfirmSession] =
 		useState(false);
 	const [postToDelete, setPostToDelete] = useState<PostItem | null>(null);
 
-	// Очистка диска
 	const [showCleanDiskModal, setShowCleanDiskModal] = useState(false);
 	const [cleanedDiskCount, setCleanedDiskCount] = useState<number | null>(
 		null,
 	);
 	const [isCleaningDisk, setIsCleaningDisk] = useState(false);
 
-	// Подтверждение очистки базы данных
 	const [showClearDbConfirmModal, setShowClearDbConfirmModal] =
 		useState(false);
 
@@ -543,7 +540,6 @@ export default function App() {
 		}
 	};
 
-	// Загрузка стены в память компонента
 	const handleScanWall = async (
 		targetId: number,
 		isLoadMore: boolean = false,
@@ -559,7 +555,24 @@ export default function App() {
 				setWallPosts(posts);
 			}
 		} catch (e) {
-			showApiError(e, "Ошибка связи с ВК", "VK Connection Error");
+			const errStr = String(e || "");
+			if (
+				errStr.includes("error 5") ||
+				errStr.includes("User authorization failed")
+			) {
+				setNotice({
+					title:
+						lang === "ru"
+							? "Требуется обновить токен"
+							: "Token Update Required",
+					message:
+						lang === "ru"
+							? "Срок действия токена истёк или сменился IP-адрес. Пожалуйста, обновите токен через кнопку «+ Добавить токен»."
+							: "Token expired or IP address changed. Please re-authenticate via '+ Add Token'.",
+				});
+			} else {
+				setNotice({ title: "Ошибка связи с ВК", message: errStr });
+			}
 		} finally {
 			setIsSyncingWall(false);
 		}
@@ -669,11 +682,11 @@ export default function App() {
 			return;
 		}
 
-		const customIso = isManualTime
-			? new Date(
-					selectedDate.setHours(pickerHours, pickerMinutes, 0, 0),
-				).toISOString()
-			: null;
+		// BUG-13: Иммутабельное создание даты без мутации React-стейта
+		const targetDate = new Date(selectedDate.getTime());
+		targetDate.setHours(pickerHours, pickerMinutes, 0, 0);
+		const customIso = isManualTime ? targetDate.toISOString() : null;
+
 		await api.addPost({
 			targetId: selectedTargetId,
 			patternId: patId,
@@ -786,7 +799,7 @@ export default function App() {
 			setQueue(updater);
 			setHistoryPosts(updater);
 		} catch (e) {
-			showApiError(e, "Ошибка загрузки фото", "Error Loading Photos");
+			setNotice({ title: "Ошибка", message: String(e) });
 		}
 	};
 
@@ -816,40 +829,7 @@ export default function App() {
 				? vkDelayedPosts
 				: historyPosts;
 	const currentTarget = targets.find((t) => t.id === selectedTargetId);
-
-	// Функция локализованной обработки ошибок VK API
-	const showApiError = (
-		err: any,
-		fallbackTitleRu: string,
-		fallbackTitleEn: string,
-	) => {
-		const errStr = String(err || "");
-		const isTokenError =
-			errStr.includes("error 5") ||
-			errStr.includes('error_code": 5') ||
-			errStr.includes("Number(5)") ||
-			errStr.includes("User authorization failed") ||
-			errStr.includes("another ip address");
-
-		if (isTokenError) {
-			setNotice({
-				title:
-					lang === "ru"
-						? "Требуется обновить токен"
-						: "Token Update Required",
-				message:
-					lang === "ru"
-						? "Срок действия токена истёк или изменился IP-адрес (например, из-за VPN). Пожалуйста, удалите недействительный токен и добавьте новый через кнопку «+ Добавить токен» в шапке приложения."
-						: "The access token has expired or your IP address has changed (e.g. due to VPN). Please delete the invalid token and add a new one via '+ Add Token' in the header.",
-			});
-			return;
-		}
-
-		setNotice({
-			title: lang === "ru" ? fallbackTitleRu : fallbackTitleEn,
-			message: errStr,
-		});
-	};
+	const t = translations[lang];
 
 	return (
 		<div
@@ -1049,7 +1029,6 @@ export default function App() {
 				/>
 			</main>
 
-			{/* Окно информации о посте при клике из календаря */}
 			{calendarDetailPost && (
 				<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-[65] animate-in fade-in duration-150">
 					<div
@@ -1063,13 +1042,14 @@ export default function App() {
 							className="flex items-center justify-between pb-2 border-b"
 							style={{ borderColor: "var(--border-app)" }}
 						>
+							{/* BUG-18: Точный заголовок поста */}
 							<span
 								className="font-bold text-sm"
 								style={{ color: "var(--text-app)" }}
 							>
-								{calendarDetailPost.is_app_created !== false
-									? `Пост #${calendarDetailPost.id}`
-									: "Пост ВКонтакте"}
+								{calendarDetailPost.vk_post_id
+									? `${lang === "ru" ? "Пост ВКонтакте" : "VK Post"} #${calendarDetailPost.vk_post_id}`
+									: `${lang === "ru" ? "Публикация" : "Post"} #${calendarDetailPost.id}`}
 							</span>
 							<button
 								onClick={() => setCalendarDetailPost(null)}
@@ -1099,14 +1079,14 @@ export default function App() {
 									}}
 								>
 									{calendarDetailPost.status === "queued"
-										? "Локально"
+										? t.statusLocal
 										: calendarDetailPost.status ===
 											  "transferred_to_vk"
-											? "В отложке ВК"
+											? t.statusVk
 											: calendarDetailPost.status ===
 												  "published"
-												? "Опубликован в ВК"
-												: "Архив"}
+												? t.statusPublished
+												: t.statusArchived}
 								</span>
 							</div>
 
@@ -1124,6 +1104,7 @@ export default function App() {
 								</p>
 							)}
 
+							{/* BUG-17: Отображение фото из CDN preview_url */}
 							{calendarDetailPost.attachments &&
 								calendarDetailPost.attachments.length > 0 && (
 									<div>
@@ -1131,7 +1112,7 @@ export default function App() {
 											className="text-[11px] font-semibold block mb-1.5"
 											style={{ color: "var(--text-dim)" }}
 										>
-											Вложений (
+											{t.attachedFiles} (
 											{
 												calendarDetailPost.attachments
 													.length
@@ -1140,43 +1121,47 @@ export default function App() {
 										</span>
 										<div className="grid grid-cols-4 gap-2">
 											{calendarDetailPost.attachments.map(
-												(att, i) => (
-													<div
-														key={i}
-														onClick={() =>
-															att.thumb_data &&
-															setFullViewImage(
-																att.thumb_data,
-															)
-														}
-														className="h-16 rounded-lg border overflow-hidden p-0.5 cursor-pointer hover:border-[var(--accent)]"
-														style={{
-															backgroundColor:
-																"var(--bg-surface-sub)",
-															borderColor:
-																"var(--border-light)",
-														}}
-													>
-														{att.thumb_data ? (
-															<img
-																src={
-																	att.thumb_data
-																}
-																alt=""
-																className="h-full w-full object-cover rounded"
-															/>
-														) : (
-															<div className="h-full w-full flex items-center justify-center">
-																<FileText
-																	className="h-4 w-4"
-																	style={{
-																		color: "var(--accent)",
-																	}}
+												(att, i) => {
+													const imgSrc =
+														(att as any)
+															.preview_url ||
+														att.thumb_data;
+													return (
+														<div
+															key={i}
+															onClick={() =>
+																imgSrc &&
+																setFullViewImage(
+																	imgSrc,
+																)
+															}
+															className="h-16 rounded-lg border overflow-hidden p-0.5 cursor-pointer hover:border-[var(--accent)]"
+															style={{
+																backgroundColor:
+																	"var(--bg-surface-sub)",
+																borderColor:
+																	"var(--border-light)",
+															}}
+														>
+															{imgSrc ? (
+																<img
+																	src={imgSrc}
+																	alt=""
+																	className="h-full w-full object-cover rounded"
 																/>
-															</div>
-														)}
-													</div>
-												),
+															) : (
+																<div className="h-full w-full flex items-center justify-center">
+																	<FileText
+																		className="h-4 w-4"
+																		style={{
+																			color: "var(--accent)",
+																		}}
+																	/>
+																</div>
+															)}
+														</div>
+													);
+												},
 											)}
 										</div>
 									</div>
@@ -1195,14 +1180,13 @@ export default function App() {
 									color: "var(--btn-primary-text)",
 								}}
 							>
-								Закрыть
+								{t.cancel}
 							</button>
 						</div>
 					</div>
 				</div>
 			)}
 
-			{/* Live Mockup стены ВК */}
 			<VkLivePreviewModal
 				show={showLivePreviewModal}
 				lang={lang}
@@ -1217,7 +1201,6 @@ export default function App() {
 				onClose={() => setShowLivePreviewModal(false)}
 			/>
 
-			{/* Окно сообщений поверх всех окон */}
 			<NoticeModal
 				show={notice !== null}
 				title={notice?.title || ""}
@@ -1248,7 +1231,6 @@ export default function App() {
 				onConfirmClean={handleExecuteCleanDisk}
 			/>
 
-			{/* Окно «Просмотр стены» */}
 			<WallViewerModal
 				show={showWallModal}
 				lang={lang}
@@ -1381,7 +1363,6 @@ export default function App() {
 				onDeletePattern={handleDeletePattern}
 			/>
 
-			{/* Окно пакетной генерации */}
 			<BatchModal
 				show={showBatchModal}
 				lang={lang}
