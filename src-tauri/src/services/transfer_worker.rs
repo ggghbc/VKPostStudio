@@ -143,19 +143,23 @@ impl TransferWorker {
                     }
 
                     match vk.upload_wall_photo(owner_id, &path).await {
-                        Ok(vk_string) => {
+                        Ok(upload_res) => {
                             let _ = sqlx::query(
                                 "UPDATE attachments SET 
                                     upload_status = 'uploaded', 
-                                    vk_attachment_string = ? 
+                                    vk_attachment_string = ?,
+                                    preview_url = ?,
+                                    full_url = ? 
                                  WHERE id = ?"
                             )
-                            .bind(&vk_string)
+                            .bind(&upload_res.vk_string)
+                            .bind(&upload_res.preview_url)
+                            .bind(&upload_res.full_url)
                             .bind(att_id)
                             .execute(db)
                             .await;
 
-                            vk_attachment_strings.push(vk_string);
+                            vk_attachment_strings.push(upload_res.vk_string);
                         }
                         Err(e) => {
                             let formatted = format_vk_error(&e.to_string());

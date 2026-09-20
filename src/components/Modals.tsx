@@ -995,9 +995,20 @@ export const CleanDiskModal: React.FC<{
 	lang: Lang;
 	cleanedCount: number | null;
 	isCleaning: boolean;
+	folderHint: string;
+	onSelectFolder: () => void;
 	onClose: () => void;
 	onConfirmClean: () => void;
-}> = ({ show, lang, cleanedCount, isCleaning, onClose, onConfirmClean }) => {
+}> = ({
+	show,
+	lang,
+	cleanedCount,
+	isCleaning,
+	folderHint,
+	onSelectFolder,
+	onClose,
+	onConfirmClean,
+}) => {
 	if (!show) return null;
 	const t = translations[lang];
 
@@ -1071,6 +1082,50 @@ export const CleanDiskModal: React.FC<{
 						>
 							{t.cleanExplain}
 						</p>
+
+						{/* Выбор папки для поиска исходников */}
+						<div
+							className="p-2.5 rounded-xl border space-y-1.5 text-xs"
+							style={{
+								backgroundColor: "var(--bg-surface-sub)",
+								borderColor: "var(--border-light)",
+							}}
+						>
+							<div className="flex items-center justify-between">
+								<span
+									className="font-semibold text-[11px]"
+									style={{ color: "var(--text-dim)" }}
+								>
+									{lang === "ru"
+										? "Папка с оригиналами:"
+										: "Source folder:"}
+								</span>
+								<button
+									type="button"
+									onClick={onSelectFolder}
+									className="px-2 py-0.5 rounded-lg border text-[11px] font-semibold hover:opacity-80 transition-all cursor-pointer"
+									style={{
+										backgroundColor: "var(--bg-surface)",
+										borderColor: "var(--border-light)",
+										color: "var(--accent)",
+									}}
+								>
+									{lang === "ru"
+										? "Выбрать папку"
+										: "Browse..."}
+								</button>
+							</div>
+							<div
+								className="font-mono text-[11px] truncate opacity-80"
+								style={{ color: "var(--text-app)" }}
+							>
+								{folderHint ||
+									(lang === "ru"
+										? "Будет выполнен поиск по известным путям"
+										: "Will search in known paths")}
+							</div>
+						</div>
+
 						<div
 							className="flex justify-end gap-2.5 pt-2 border-t"
 							style={{ borderColor: "var(--border-app)" }}
@@ -2465,6 +2520,7 @@ export const LightboxModal: React.FC<{
 				<img
 					src={url}
 					alt="Full preview"
+					referrerPolicy="no-referrer"
 					className="max-w-full max-h-[90vh] min-w-[320px] object-contain rounded-xl shadow-2xl"
 				/>
 				<button

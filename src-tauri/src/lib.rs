@@ -38,6 +38,9 @@ pub fn run() {
                 let pasted_dir = app_dir.join("pasted_images");
                 std::fs::create_dir_all(&pasted_dir).ok();
 
+                let media_dir = app_dir.join("media");
+                std::fs::create_dir_all(&media_dir).ok();
+
                 let db_path = app_dir.join("studio.sqlite");
 
                 let connect_options = sqlx::sqlite::SqliteConnectOptions::new()
@@ -90,7 +93,7 @@ pub fn run() {
                 let _ = sqlx::query("DELETE FROM attachments WHERE post_id IN (SELECT id FROM posts WHERE guid LIKE 'vk_ext_%');").execute(&pool).await;
                 let _ = sqlx::query("DELETE FROM posts WHERE guid LIKE 'vk_ext_%';").execute(&pool).await;
 
-                // Проверка и добавление отсутствующих колонок в posts
+                // Миграции таблицы posts
                 let post_columns: Vec<String> = sqlx::query("PRAGMA table_info(posts)")
                     .fetch_all(&pool)
                     .await
@@ -115,6 +118,7 @@ pub fn run() {
                     let _ = sqlx::query("ALTER TABLE posts ADD COLUMN attachments_view_mode TEXT NOT NULL DEFAULT 'grid'").execute(&pool).await;
                 }
 
+                // Миграции таблицы attachments
                 let att_columns: Vec<String> = sqlx::query("PRAGMA table_info(attachments)")
                     .fetch_all(&pool)
                     .await
@@ -129,12 +133,17 @@ pub fn run() {
                 if !att_columns.contains(&"preview_url".to_string()) {
                     let _ = sqlx::query("ALTER TABLE attachments ADD COLUMN preview_url TEXT").execute(&pool).await;
                 }
-
                 if !att_columns.contains(&"full_url".to_string()) {
                     let _ = sqlx::query("ALTER TABLE attachments ADD COLUMN full_url TEXT").execute(&pool).await;
                 }
+                if !att_columns.contains(&"original_path".to_string()) {
+                    let _ = sqlx::query("ALTER TABLE attachments ADD COLUMN original_path TEXT").execute(&pool).await;
+                }
+                if !att_columns.contains(&"file_hash".to_string()) {
+                    let _ = sqlx::query("ALTER TABLE attachments ADD COLUMN file_hash TEXT").execute(&pool).await;
+                }
 
-                // Проверка и добавление интервала в patterns
+                // Миграции таблицы patterns
                 let pat_columns: Vec<String> = sqlx::query("PRAGMA table_info(patterns)")
                     .fetch_all(&pool)
                     .await
@@ -147,7 +156,25 @@ pub fn run() {
                     let _ = sqlx::query("ALTER TABLE patterns ADD COLUMN interval_days INTEGER NOT NULL DEFAULT 1").execute(&pool).await;
                 }
 
-                // Уникальный индекс для targets, исключающий дубликаты
+                // Реестр файлов для отслеживания и очистки
+                let _ = sqlx::query(
+                    "CREATE TABLE IF NOT EXISTS tracked_files (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        post_id INTEGER NOT NULL,
+                        target_id INTEGER NOT NULL,
+                        file_path TEXT NOT NULL,
+                        file_name TEXT NOT NULL,
+                        file_hash TEXT,
+                        status TEXT NOT NULL DEFAULT 'pending'
+                    );"
+                ).execute(&pool).await;
+
+                let _ = sqlx::query(
+                    "CREATE TABLE IF NOT EXISTS known_folders (
+                        dir_path TEXT PRIMARY KEY
+                    );"
+                ).execute(&pool).await;
+
                 let _ = sqlx::query("CREATE UNIQUE INDEX IF NOT EXISTS idx_targets_acc_owner ON targets(account_id, owner_id);").execute(&pool).await;
 
                 sqlx::query(

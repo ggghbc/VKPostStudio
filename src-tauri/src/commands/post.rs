@@ -7,7 +7,9 @@ use crate::vk::client::VkClient;
 use crate::AppState;
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
-use std::path::PathBuf;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::Hasher;
+use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager, State};
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -73,6 +75,12 @@ pub struct DownloadedVkPhotoDto {
     pub data_url: String,
 }
 
+fn compute_file_hash(bytes: &[u8]) -> String {
+    let mut hasher = DefaultHasher::new();
+    hasher.write(bytes);
+    format!("{:016x}_{}", hasher.finish(), bytes.len())
+}
+
 fn get_thumbs_dir(app: &AppHandle) -> PathBuf {
     let dir = app
         .path()
@@ -119,7 +127,7 @@ async fn get_attachments_for_post(
     thumbs_dir: &PathBuf,
 ) -> Vec<AttachmentDto> {
     let att_rows = sqlx::query(
-        "SELECT id, file_name, size_bytes, local_path, vk_attachment_string, preview_url, full_url, order_index 
+        "SELECT id, file_name, size_bytes, local_path, original_path, vk_attachment_string, preview_url, full_url, order_index 
          FROM attachments WHERE post_id = ? ORDER BY order_index ASC",
     )
     .bind(post_id)
@@ -131,11 +139,19 @@ async fn get_attachments_for_post(
     for a in att_rows {
         let att_id: i64 = a.get("id");
         let local_path: Option<String> = a.get("local_path");
+        let original_path: Option<String> = a.try_get("original_path").ok().flatten();
         let raw_name: String = a
             .try_get("file_name")
             .unwrap_or_else(|_| "файл".to_string());
-        let preview_url: Option<String> = a.try_get("preview_url").ok();
-        let full_url: Option<String> = a.try_get("full_url").ok();
+
+        let preview_url: Option<String> = a
+            .try_get("preview_url")
+            .ok()
+            .filter(|s: &String| !s.trim().is_empty());
+        let full_url: Option<String> = a
+            .try_get("full_url")
+            .ok()
+            .filter(|s: &String| !s.trim().is_empty());
 
         let file_name = if raw_name == "vk_media" {
             let idx: i64 = a.try_get("order_index").unwrap_or(0);
@@ -144,16 +160,22 @@ async fn get_attachments_for_post(
             raw_name.clone()
         };
 
-        let thumb_data = if preview_url.is_some() || raw_name == "vk_media" {
+        let effective_path = local_path.clone().or(original_path);
+
+        let thumb_data = if preview_url.is_some() {
             None
         } else {
             let thumb_path = thumbs_dir.join(format!("{}.thumb", att_id));
-            if thumb_path.exists() {
+            if thumb_path.exists() && raw_name != "vk_media" {
                 tokio::fs::read_to_string(&thumb_path).await.ok()
-            } else if let Some(ref lp) = local_path {
+            } else if let Some(ref lp) = effective_path {
                 let p = PathBuf::from(lp);
                 if p.exists() {
-                    get_file_preview_base64(lp.clone()).await.ok()
+                    let b64 = get_file_preview_base64(lp.clone()).await.ok();
+                    if let Some(ref data) = b64 {
+                        let _ = tokio::fs::write(&thumb_path, data).await;
+                    }
+                    b64
                 } else {
                     None
                 }
@@ -166,7 +188,7 @@ async fn get_attachments_for_post(
             id: att_id,
             file_name,
             size_bytes: a.try_get("size_bytes").unwrap_or(0),
-            local_path,
+            local_path: effective_path,
             vk_attachment_string: a.try_get("vk_attachment_string").ok(),
             thumb_data,
             preview_url,
@@ -192,8 +214,8 @@ pub async fn clean_post_disk_assets(post_id: i64, app: &AppHandle, db: &sqlx::Sq
 
             let local_path: Option<String> = a.get("local_path");
             if let Some(lp) = local_path {
-                if lp.contains("pasted_images") {
-                    let _ = tokio::fs::remove_file(lp).await;
+                if lp.contains("pasted_images") || lp.contains("media") {
+                    let _ = tokio::fs::remove_file(PathBuf::from(&lp)).await;
                 }
             }
         }
@@ -288,7 +310,7 @@ pub async fn fetch_live_wall_posts(
     let token = TokenVault::get_token(account_id, &db_token);
     let client = reqwest::Client::new();
     let url = format!(
-        "https://api.vk.com/method/wall.get?access_token={}&v=5.131&owner_id={}&filter=owner&count=30&offset={}",
+        "https://api.vk.com/method/wall.get?access_token={}&v=5.131&owner_id={}&filter=owner&count=30&offset={}&photo_sizes=1",
         token, owner_id, offset
     );
 
@@ -340,14 +362,29 @@ pub async fn fetch_live_wall_posts(
             for att in atts {
                 if att.get("type").and_then(|v| v.as_str()) == Some("photo") {
                     if let Some(photo) = att.get("photo") {
+                        let mut p_url = String::new();
                         if let Some(sizes) = photo.get("sizes").and_then(|v| v.as_array()) {
-                            if let Some(best) = sizes
-                                .last()
-                                .and_then(|s| s.get("url"))
+                            p_url = sizes
+                                .iter()
+                                .find(|s| {
+                                    matches!(s.get("type").and_then(|v| v.as_str()), Some("x" | "y" | "z" | "m"))
+                                })
+                                .or_else(|| sizes.last())
+                                .and_then(|s| s.get("url").or_else(|| s.get("src")))
                                 .and_then(|u| u.as_str())
-                            {
-                                preview_urls.push(best.to_string());
+                                .unwrap_or("")
+                                .to_string();
+                        }
+                        if p_url.is_empty() {
+                            for key in &["photo_604", "photo_807", "photo_1280", "photo_130"] {
+                                if let Some(u) = photo.get(*key).and_then(|v| v.as_str()) {
+                                    p_url = u.to_string();
+                                    break;
+                                }
                             }
+                        }
+                        if !p_url.is_empty() {
+                            preview_urls.push(p_url);
                         }
                     }
                 }
@@ -491,6 +528,7 @@ pub async fn fetch_vk_post_photos(
     Ok(result)
 }
 
+// Надежная синхронизация: ссылки обновляются, а local_path и original_path НИКОГДА не затираются
 #[tauri::command]
 pub async fn sync_vk_delayed_posts(
     target_id: i64,
@@ -550,16 +588,15 @@ pub async fn sync_vk_delayed_posts(
                     .await
                     .map_err(|e| e.to_string())?;
 
-                    let needs_refresh: bool = sqlx::query_scalar(
-                        "SELECT COUNT(*) FROM attachments WHERE post_id = ? AND (full_url IS NULL OR preview_url IS NULL)"
+                    let existing_att_count: i64 = sqlx::query_scalar(
+                        "SELECT COUNT(*) FROM attachments WHERE post_id = ?",
                     )
                     .bind(pid)
                     .fetch_one(&state.db)
                     .await
-                    .unwrap_or(0) > 0;
+                    .unwrap_or(0);
 
-                    if needs_refresh && !item.photos.is_empty() {
-                        let _ = sqlx::query("DELETE FROM attachments WHERE post_id = ?").bind(pid).execute(&state.db).await;
+                    if existing_att_count == 0 {
                         for (i, photo) in item.photos.iter().enumerate() {
                             let vk_str = format!("photo{}_{}", photo.owner_id, photo.id);
                             let _ = sqlx::query(
@@ -571,6 +608,25 @@ pub async fn sync_vk_delayed_posts(
                             .bind(&vk_str)
                             .bind(&photo.preview_url)
                             .bind(&photo.full_url)
+                            .execute(&state.db)
+                            .await;
+                        }
+                    } else {
+                        // Обновляем ссылки ВК без удаления local_path и original_path
+                        for (i, photo) in item.photos.iter().enumerate() {
+                            let vk_str = format!("photo{}_{}", photo.owner_id, photo.id);
+                            let _ = sqlx::query(
+                                "UPDATE attachments SET 
+                                    vk_attachment_string = COALESCE(?, vk_attachment_string),
+                                    preview_url = COALESCE(?, preview_url),
+                                    full_url = COALESCE(?, full_url)
+                                 WHERE post_id = ? AND order_index = ?",
+                            )
+                            .bind(&vk_str)
+                            .bind(&photo.preview_url)
+                            .bind(&photo.full_url)
+                            .bind(pid)
+                            .bind(i as i32)
                             .execute(&state.db)
                             .await;
                         }
@@ -926,10 +982,11 @@ pub async fn update_post(
         let upload_status = if is_uploaded { "uploaded" } else { "pending" };
 
         let att_id = sqlx::query(
-            "INSERT INTO attachments (post_id, local_path, file_name, size_bytes, attachment_kind, upload_status, vk_attachment_string, order_index)
-             VALUES (?, ?, ?, 0, 'photo', ?, ?, ?) RETURNING id"
+            "INSERT INTO attachments (post_id, local_path, original_path, file_name, size_bytes, attachment_kind, upload_status, vk_attachment_string, order_index)
+             VALUES (?, ?, ?, ?, 0, 'photo', ?, ?, ?) RETURNING id"
         )
         .bind(post_id)
+        .bind(&att.local_path)
         .bind(&att.local_path)
         .bind(&att.file_name)
         .bind(upload_status)
@@ -954,46 +1011,195 @@ pub async fn update_post(
     Ok(())
 }
 
+fn delete_file_with_mode(path: &Path, to_trash: bool) -> bool {
+    if !path.exists() {
+        return false;
+    }
+    if to_trash {
+        if trash::delete(path).is_ok() {
+            return true;
+        }
+        std::fs::remove_file(path).is_ok()
+    } else {
+        std::fs::remove_file(path).is_ok()
+    }
+}
+
+// Очистка файлов с диска: прямой путь + поиск по имени и хэшу в реестре
 #[tauri::command]
 pub async fn clean_uploaded_local_files(
     target_id: i64,
     to_trash: bool,
+    folder_hint: Option<String>,
+    app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<i64, String> {
-    let rows = sqlx::query(
-        "SELECT a.id, a.local_path 
-         FROM attachments a 
-         JOIN posts p ON a.post_id = p.id 
+    // 1. Находим все посты, находящиеся в отложке ВК или опубликованные
+    let post_ids: Vec<i64> = sqlx::query_scalar(
+        "SELECT p.id 
+         FROM posts p 
          JOIN targets t ON p.target_id = t.id
          WHERE t.owner_id = (SELECT owner_id FROM targets WHERE id = ?)
-           AND p.status IN ('transferred_to_vk', 'published') 
-           AND a.local_path IS NOT NULL",
+           AND p.status IN ('transferred_to_vk', 'published')",
     )
     .bind(target_id)
     .fetch_all(&state.db)
     .await
     .map_err(|e| e.to_string())?;
 
-    let mut deleted_count = 0;
-    for r in rows {
-        let att_id: i64 = r.get("id");
-        let path_str: String = r.get("local_path");
-        let path = std::path::Path::new(&path_str);
-        if path.exists() {
-            if to_trash {
-                if trash::delete(path).is_ok() {
-                    deleted_count += 1;
-                } else if tokio::fs::remove_file(path).await.is_ok() {
-                    deleted_count += 1;
-                }
-            } else if tokio::fs::remove_file(path).await.is_ok() {
-                deleted_count += 1;
+    if post_ids.is_empty() {
+        return Ok(0);
+    }
+
+    // 2. Собираем каталоги для умного поиска
+    let mut search_dirs: Vec<PathBuf> = Vec::new();
+
+    if let Some(ref hint) = folder_hint {
+        let p = PathBuf::from(hint);
+        if p.exists() {
+            search_dirs.push(p);
+        }
+    }
+
+    let known_rows: Vec<String> = sqlx::query_scalar("SELECT dir_path FROM known_folders")
+        .fetch_all(&state.db)
+        .await
+        .unwrap_or_default();
+
+    for d in known_rows {
+        let p = PathBuf::from(d);
+        if p.exists() && !search_dirs.contains(&p) {
+            search_dirs.push(p);
+        }
+    }
+
+    // Добавляем стандартные папки пользователя
+    if let Ok(profile) = std::env::var("USERPROFILE") {
+        let p = PathBuf::from(&profile);
+        for sub in &["Desktop", "Downloads", "Pictures"] {
+            let sp = p.join(sub);
+            if sp.exists() && !search_dirs.contains(&sp) {
+                search_dirs.push(sp);
             }
         }
-        let _ = sqlx::query("UPDATE attachments SET local_path = NULL WHERE id = ?")
+    }
+
+    let mut deleted_count = 0;
+    let mut cleaned_att_ids = Vec::new();
+    let mut cleaned_tracked_ids = Vec::new();
+
+    for pid in post_ids {
+        // Поиск по attachments
+        let atts = sqlx::query(
+            "SELECT id, local_path, original_path, file_name, file_hash FROM attachments WHERE post_id = ?",
+        )
+        .bind(pid)
+        .fetch_all(&state.db)
+        .await
+        .unwrap_or_default();
+
+        for r in atts {
+            let att_id: i64 = r.get("id");
+            let local_p: Option<String> = r.try_get("local_path").ok().flatten();
+            let orig_p: Option<String> = r.try_get("original_path").ok().flatten();
+            let fname: String = r.try_get("file_name").unwrap_or_default();
+            let _fhash: Option<String> = r.try_get("file_hash").ok().flatten();
+
+            let mut was_deleted = false;
+
+            // Способ 1: Прямой путь
+            for candidate in [local_p.as_deref(), orig_p.as_deref()].into_iter().flatten() {
+                let p = Path::new(candidate);
+                if p.exists() && !p.to_string_lossy().contains("thumbnails") {
+                    if delete_file_with_mode(p, to_trash) {
+                        was_deleted = true;
+                        break;
+                    }
+                }
+            }
+
+            // Способ 2: Поиск по имени файла в известных директориях
+            if !was_deleted && !fname.is_empty() && fname != "vk_media" {
+                for sdir in &search_dirs {
+                    let direct_candidate = sdir.join(&fname);
+                    if direct_candidate.exists() {
+                        if delete_file_with_mode(&direct_candidate, to_trash) {
+                            was_deleted = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if was_deleted {
+                deleted_count += 1;
+                cleaned_att_ids.push(att_id);
+            }
+        }
+
+        // Поиск по tracked_files
+        let tracked = sqlx::query(
+            "SELECT id, file_path, file_name, file_hash FROM tracked_files WHERE post_id = ? AND status = 'pending'",
+        )
+        .bind(pid)
+        .fetch_all(&state.db)
+        .await
+        .unwrap_or_default();
+
+        for tr in tracked {
+            let tr_id: i64 = tr.get("id");
+            let fpath_str: String = tr.get("file_path");
+            let fname: String = tr.get("file_name");
+            let p = Path::new(&fpath_str);
+            let mut was_deleted = false;
+
+            if p.exists() {
+                if delete_file_with_mode(p, to_trash) {
+                    was_deleted = true;
+                }
+            } else if !fname.is_empty() {
+                for sdir in &search_dirs {
+                    let direct_candidate = sdir.join(&fname);
+                    if direct_candidate.exists() {
+                        if delete_file_with_mode(&direct_candidate, to_trash) {
+                            was_deleted = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if was_deleted {
+                deleted_count += 1;
+                cleaned_tracked_ids.push(tr_id);
+            }
+        }
+    }
+
+    for att_id in cleaned_att_ids {
+        let _ = sqlx::query("UPDATE attachments SET local_path = NULL, original_path = NULL WHERE id = ?")
             .bind(att_id)
             .execute(&state.db)
             .await;
+    }
+
+    for tr_id in cleaned_tracked_ids {
+        let _ = sqlx::query("UPDATE tracked_files SET status = 'deleted' WHERE id = ?")
+            .bind(tr_id)
+            .execute(&state.db)
+            .await;
+    }
+
+    // Очистка media/ временных файлов (если есть)
+    if let Ok(app_dir) = app.path().app_data_dir() {
+        let media_dir = app_dir.join("media");
+        if media_dir.exists() {
+            if let Ok(mut entries) = tokio::fs::read_dir(&media_dir).await {
+                while let Ok(Some(entry)) = entries.next_entry().await {
+                    let _ = tokio::fs::remove_file(entry.path()).await;
+                }
+            }
+        }
     }
 
     Ok(deleted_count)
@@ -1153,17 +1359,32 @@ pub async fn add_post_to_queue(
     let thumbs_dir = get_thumbs_dir(&app);
 
     for (idx, path_str) in file_paths.iter().enumerate() {
-        let p = std::path::Path::new(path_str);
+        let p = Path::new(path_str);
         let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("file");
         let size = std::fs::metadata(p).map(|m| m.len() as i64).unwrap_or(0);
 
+        let bytes = tokio::fs::read(path_str).await.unwrap_or_default();
+        let file_hash = compute_file_hash(&bytes);
+
+        // Запоминаем каталог файлов
+        if let Some(parent) = p.parent() {
+            let p_str = parent.to_string_lossy().to_string();
+            let _ = sqlx::query("INSERT OR IGNORE INTO known_folders (dir_path) VALUES (?)")
+                .bind(&p_str)
+                .execute(&mut *tx)
+                .await;
+        }
+
+        // Сохраняем в attachments
         let att_id = sqlx::query(
-            "INSERT INTO attachments (post_id, local_path, file_name, size_bytes, attachment_kind, order_index)
-             VALUES (?, ?, ?, ?, 'photo', ?) RETURNING id",
+            "INSERT INTO attachments (post_id, local_path, original_path, file_name, file_hash, size_bytes, attachment_kind, order_index)
+             VALUES (?, ?, ?, ?, ?, ?, 'photo', ?) RETURNING id",
         )
         .bind(post_id)
         .bind(path_str)
+        .bind(path_str)
         .bind(name)
+        .bind(&file_hash)
         .bind(size)
         .bind(idx as i32)
         .fetch_one(&mut *tx)
@@ -1171,6 +1392,20 @@ pub async fn add_post_to_queue(
         .map_err(|e| e.to_string())?
         .get::<i64, _>("id");
 
+        // Записываем в tracked_files
+        let _ = sqlx::query(
+            "INSERT INTO tracked_files (post_id, target_id, file_path, file_name, file_hash)
+             VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(post_id)
+        .bind(target_id)
+        .bind(path_str)
+        .bind(name)
+        .bind(&file_hash)
+        .execute(&mut *tx)
+        .await;
+
+        // Сохраняем миниатюру base64 в thumbnails/{att_id}.thumb
         if let Ok(b64) = get_file_preview_base64(path_str.clone()).await {
             let thumb_path = thumbs_dir.join(format!("{}.thumb", att_id));
             let _ = tokio::fs::write(&thumb_path, b64).await;

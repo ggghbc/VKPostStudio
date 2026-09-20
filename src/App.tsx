@@ -34,7 +34,6 @@ import { Lang, translations } from "./services/i18n";
 import { format } from "date-fns";
 
 export default function App() {
-	// BUG-11: Дефолтная тема 'pastel' вместо несуществующей 'classic'
 	const [theme, setTheme] = useState<Theme>(
 		() => (localStorage.getItem("vk_theme") as Theme) || "pastel",
 	);
@@ -46,6 +45,10 @@ export default function App() {
 			(localStorage.getItem("vk_delete_mode") as "permanent" | "trash") ||
 			"trash"
 		);
+	});
+
+	const [cleanFolderHint, setCleanFolderHint] = useState<string>(() => {
+		return localStorage.getItem("vk_last_folder") || "";
 	});
 
 	const [accounts, setAccounts] = useState<Account[]>([]);
@@ -128,16 +131,13 @@ export default function App() {
 
 	const [showLivePreviewModal, setShowLivePreviewModal] = useState(false);
 
-	// Стена сообщества
 	const [showWallModal, setShowWallModal] = useState(false);
 	const [wallPosts, setWallPosts] = useState<LiveWallPostItem[]>([]);
 	const [isSyncingWall, setIsSyncingWall] = useState(false);
 	const [wallOffset, setWallOffset] = useState<number>(0);
 
-	// Карточка поста из календаря
 	const [calendarDetailPost, setCalendarDetailPost] =
 		useState<PostItem | null>(null);
-
 	const [notice, setNotice] = useState<{
 		title: string;
 		message: string;
@@ -192,6 +192,14 @@ export default function App() {
 	const handleSetLang = (newLang: Lang) => {
 		setLang(newLang);
 		localStorage.setItem("vk_lang", newLang);
+	};
+
+	const handlePickCleanFolder = async () => {
+		const res = await open({ directory: true, multiple: false });
+		if (res && typeof res === "string") {
+			setCleanFolderHint(res);
+			localStorage.setItem("vk_last_folder", res);
+		}
 	};
 
 	useEffect(() => {
@@ -327,6 +335,12 @@ export default function App() {
 
 				const rawPaths: string[] = event.payload?.paths || [];
 				if (rawPaths.length === 0) return;
+
+				if (rawPaths[0]) {
+					const dir = rawPaths[0].replace(/[\\/][^\\/]+$/, "");
+					setCleanFolderHint(dir);
+					localStorage.setItem("vk_last_folder", dir);
+				}
 
 				if (showBatchModalRef.current) {
 					setBatchPaths((prev) =>
@@ -629,6 +643,11 @@ export default function App() {
 		});
 		if (res) {
 			const paths = Array.isArray(res) ? res : [res];
+			if (paths[0]) {
+				const dir = paths[0].replace(/[\\/][^\\/]+$/, "");
+				setCleanFolderHint(dir);
+				localStorage.setItem("vk_last_folder", dir);
+			}
 			await appendFiles(paths);
 		}
 	};
@@ -682,7 +701,6 @@ export default function App() {
 			return;
 		}
 
-		// BUG-13: Иммутабельное создание даты без мутации React-стейта
 		const targetDate = new Date(selectedDate.getTime());
 		targetDate.setHours(pickerHours, pickerMinutes, 0, 0);
 		const customIso = isManualTime ? targetDate.toISOString() : null;
@@ -750,7 +768,11 @@ export default function App() {
 		setIsCleaningDisk(true);
 		try {
 			const toTrash = deleteMode === "trash";
-			const count = await api.cleanLocalFiles(selectedTargetId, toTrash);
+			const count = await api.cleanLocalFiles(
+				selectedTargetId,
+				toTrash,
+				cleanFolderHint || undefined,
+			);
 			setCleanedDiskCount(count);
 			syncVkQueue(selectedTargetId);
 		} catch (e) {
@@ -1001,7 +1023,7 @@ export default function App() {
 								path: a.local_path || "",
 								name: a.file_name,
 								isImage: true,
-								previewUrl: a.thumb_data,
+								previewUrl: a.preview_url || a.thumb_data,
 								vkAttachmentString: a.vk_attachment_string,
 							})),
 						);
@@ -1042,7 +1064,6 @@ export default function App() {
 							className="flex items-center justify-between pb-2 border-b"
 							style={{ borderColor: "var(--border-app)" }}
 						>
-							{/* BUG-18: Точный заголовок поста */}
 							<span
 								className="font-bold text-sm"
 								style={{ color: "var(--text-app)" }}
@@ -1104,7 +1125,6 @@ export default function App() {
 								</p>
 							)}
 
-							{/* BUG-17: Отображение фото из CDN preview_url */}
 							{calendarDetailPost.attachments &&
 								calendarDetailPost.attachments.length > 0 && (
 									<div>
@@ -1122,17 +1142,20 @@ export default function App() {
 										<div className="grid grid-cols-4 gap-2">
 											{calendarDetailPost.attachments.map(
 												(att, i) => {
-													const imgSrc =
-														(att as any)
-															.preview_url ||
+													const thumbSrc =
+														att.preview_url ||
 														att.thumb_data;
+													const fullSrc =
+														att.full_url ||
+														att.thumb_data ||
+														att.preview_url;
 													return (
 														<div
 															key={i}
 															onClick={() =>
-																imgSrc &&
+																fullSrc &&
 																setFullViewImage(
-																	imgSrc,
+																	fullSrc,
 																)
 															}
 															className="h-16 rounded-lg border overflow-hidden p-0.5 cursor-pointer hover:border-[var(--accent)]"
@@ -1143,10 +1166,13 @@ export default function App() {
 																	"var(--border-light)",
 															}}
 														>
-															{imgSrc ? (
+															{thumbSrc ? (
 																<img
-																	src={imgSrc}
+																	src={
+																		thumbSrc
+																	}
 																	alt=""
+																	referrerPolicy="no-referrer"
 																	className="h-full w-full object-cover rounded"
 																/>
 															) : (
@@ -1227,6 +1253,8 @@ export default function App() {
 				lang={lang}
 				cleanedCount={cleanedDiskCount}
 				isCleaning={isCleaningDisk}
+				folderHint={cleanFolderHint}
+				onSelectFolder={handlePickCleanFolder}
 				onClose={() => setShowCleanDiskModal(false)}
 				onConfirmClean={handleExecuteCleanDisk}
 			/>

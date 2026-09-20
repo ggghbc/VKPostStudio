@@ -66,8 +66,16 @@ export const api = {
 	addPost: (params: any) => invoke<number>("add_post_to_queue", params),
 	updatePost: (params: any) => invoke("update_post", params),
 	batchCreate: (params: any) => invoke<number>("batch_create_posts", params),
-	cleanLocalFiles: (targetId: number, toTrash: boolean) =>
-		invoke<number>("clean_uploaded_local_files", { targetId, toTrash }),
+	cleanLocalFiles: (
+		targetId: number,
+		toTrash: boolean,
+		folderHint?: string,
+	) =>
+		invoke<number>("clean_uploaded_local_files", {
+			targetId,
+			toTrash,
+			folderHint,
+		}),
 	clearDatabaseExceptTokens: () => invoke("clear_database_except_tokens"),
 
 	rescheduleNextSlot: (postId: number, patternId: number) =>

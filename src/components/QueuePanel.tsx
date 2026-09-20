@@ -687,25 +687,46 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
 																		att.full_url ||
 																		att.thumb_data ||
 																		att.preview_url;
+																	const isVkPost =
+																		Boolean(
+																			post.vk_post_id,
+																		);
+
 																	return (
 																		<div
 																			key={
 																				att.id ||
 																				i
 																			}
-																			onClick={() =>
-																				fullSrc &&
-																				onOpenFullImage(
-																					fullSrc,
-																				)
-																			}
-																			className="h-20 rounded-xl border overflow-hidden p-0.5 cursor-pointer hover:border-[var(--accent)] transition-all shadow-sm"
+																			onClick={() => {
+																				if (
+																					fullSrc
+																				) {
+																					onOpenFullImage(
+																						fullSrc,
+																					);
+																				} else if (
+																					isVkPost
+																				) {
+																					onLoadVkPhotos(
+																						post,
+																					);
+																				}
+																			}}
+																			className="h-20 rounded-xl border overflow-hidden p-0.5 cursor-pointer hover:border-[var(--accent)] transition-all shadow-sm group"
 																			style={{
 																				backgroundColor:
 																					"var(--bg-surface)",
 																				borderColor:
 																					"var(--border-light)",
 																			}}
+																			title={
+																				fullSrc
+																					? t.livePreview
+																					: isVkPost
+																						? t.loadVkPhotos
+																						: att.file_name
+																			}
 																		>
 																			{thumbSrc ? (
 																				<img
@@ -715,10 +736,11 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
 																					alt={
 																						att.file_name
 																					}
-																					className="h-full w-full object-cover rounded-lg"
+																					referrerPolicy="no-referrer"
+																					className="h-full w-full object-cover rounded-lg group-hover:scale-105 transition-transform duration-200"
 																				/>
 																			) : (
-																				<div className="h-full w-full flex flex-col items-center justify-center p-1 text-center">
+																				<div className="h-full w-full flex flex-col items-center justify-center p-1 text-center group-hover:bg-[var(--accent-glow)] transition-colors">
 																					<FileText
 																						className="h-5 w-5 mb-1"
 																						style={{

@@ -70,6 +70,13 @@ pub struct VkPostponedItem {
     pub photos: Vec<VkPhotoPreview>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VkPhotoUploadResult {
+    pub vk_string: String,
+    pub preview_url: Option<String>,
+    pub full_url: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub enum TokenOwner {
     User { id: i64, name: String },
@@ -238,6 +245,7 @@ impl VkClient {
             .collect())
     }
 
+    // BUG-21: Включение photo_sizes=1 и извлечение прямых CDN ссылок
     pub async fn get_postponed_posts(&self, owner_id: i64) -> Result<Vec<VkPostponedItem>> {
         let owner_id_str = owner_id.to_string();
 
@@ -247,6 +255,7 @@ impl VkClient {
             ("owner_id", owner_id_str.as_str()),
             ("filter", "postponed"),
             ("count", "100"),
+            ("photo_sizes", "1"),
         ];
 
         let res_val: serde_json::Value = match self.get_vk("wall.get", params.clone()).await {
@@ -272,35 +281,57 @@ impl VkClient {
                         if let Some(photo) = att.get("photo") {
                             let pid = photo.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
                             let powner = photo.get("owner_id").and_then(|v| v.as_i64()).unwrap_or(0);
+
+                            let mut full_url = String::new();
+                            let mut preview_url = String::new();
+
                             if let Some(sizes) = photo.get("sizes").and_then(|v| v.as_array()) {
-                                // Полноразмерный оригинал фото в максимальном разрешении
-                                let full_url = sizes
+                                full_url = sizes
                                     .last()
-                                    .and_then(|s| s.get("url"))
+                                    .and_then(|s| s.get("url").or_else(|| s.get("src")))
                                     .and_then(|u| u.as_str())
                                     .unwrap_or("")
                                     .to_string();
 
-                                // Превью оптимального качества (x/y/z) для ленты
-                                let preview_url = sizes
+                                preview_url = sizes
                                     .iter()
                                     .find(|s| {
-                                        matches!(s.get("type").and_then(|v| v.as_str()), Some("x" | "y" | "z"))
+                                        matches!(s.get("type").and_then(|v| v.as_str()), Some("x" | "y" | "z" | "m"))
                                     })
-                                    .or_else(|| sizes.last())
-                                    .and_then(|s| s.get("url"))
+                                    .or_else(|| sizes.first())
+                                    .and_then(|s| s.get("url").or_else(|| s.get("src")))
                                     .and_then(|u| u.as_str())
                                     .unwrap_or(&full_url)
                                     .to_string();
+                            }
 
-                                if !full_url.is_empty() {
-                                    photos.push(VkPhotoPreview {
-                                        id: pid,
-                                        owner_id: powner,
-                                        preview_url: if preview_url.is_empty() { full_url.clone() } else { preview_url },
-                                        full_url,
-                                    });
+                            if full_url.is_empty() {
+                                for key in &["photo_2560", "photo_1280", "photo_807", "photo_604", "photo_130", "photo_75"] {
+                                    if let Some(u) = photo.get(*key).and_then(|v| v.as_str()) {
+                                        full_url = u.to_string();
+                                        break;
+                                    }
                                 }
+                            }
+                            if preview_url.is_empty() {
+                                for key in &["photo_604", "photo_130", "photo_75"] {
+                                    if let Some(u) = photo.get(*key).and_then(|v| v.as_str()) {
+                                        preview_url = u.to_string();
+                                        break;
+                                    }
+                                }
+                                if preview_url.is_empty() {
+                                    preview_url = full_url.clone();
+                                }
+                            }
+
+                            if !full_url.is_empty() {
+                                photos.push(VkPhotoPreview {
+                                    id: pid,
+                                    owner_id: powner,
+                                    preview_url: if preview_url.is_empty() { full_url.clone() } else { preview_url },
+                                    full_url,
+                                });
                             }
                         }
                     }
@@ -342,6 +373,7 @@ impl VkClient {
             ("filter", "owner"),
             ("count", count_str.as_str()),
             ("offset", offset_str.as_str()),
+            ("photo_sizes", "1"),
         ];
 
         let res_val: serde_json::Value = self.get_vk("wall.get", params).await?;
@@ -407,7 +439,8 @@ impl VkClient {
         Ok(())
     }
 
-    pub async fn upload_wall_photo(&self, target_owner_id: i64, file_path: &Path) -> Result<String> {
+    // BUG-23: Возврат VkPhotoUploadResult с preview_url и full_url
+    pub async fn upload_wall_photo(&self, target_owner_id: i64, file_path: &Path) -> Result<VkPhotoUploadResult> {
         let file_bytes = tokio::fs::read(file_path)
             .await
             .with_context(|| format!("Не удалось прочитать файл: {:?}", file_path))?;
@@ -542,7 +575,53 @@ impl VkClient {
             .and_then(|v| v.as_i64())
             .ok_or_else(|| anyhow!("Нет owner_id фото: {:?}", first))?;
 
-        Ok(format!("photo{}_{}", p_owner, pid))
+        let mut full_url = None;
+        let mut preview_url = None;
+
+        if let Some(sizes) = first.get("sizes").and_then(|v| v.as_array()) {
+            full_url = sizes
+                .last()
+                .and_then(|s| s.get("url").or_else(|| s.get("src")))
+                .and_then(|u| u.as_str())
+                .map(|s| s.to_string());
+
+            preview_url = sizes
+                .iter()
+                .find(|s| {
+                    matches!(s.get("type").and_then(|v| v.as_str()), Some("x" | "y" | "z" | "m"))
+                })
+                .or_else(|| sizes.last())
+                .and_then(|s| s.get("url").or_else(|| s.get("src")))
+                .and_then(|u| u.as_str())
+                .map(|s| s.to_string());
+        }
+
+        if full_url.is_none() {
+            for key in &["photo_2560", "photo_1280", "photo_807", "photo_604", "photo_130"] {
+                if let Some(u) = first.get(*key).and_then(|v| v.as_str()) {
+                    full_url = Some(u.to_string());
+                    break;
+                }
+            }
+        }
+
+        if preview_url.is_none() {
+            for key in &["photo_604", "photo_130", "photo_75"] {
+                if let Some(u) = first.get(*key).and_then(|v| v.as_str()) {
+                    preview_url = Some(u.to_string());
+                    break;
+                }
+            }
+            if preview_url.is_none() {
+                preview_url = full_url.clone();
+            }
+        }
+
+        Ok(VkPhotoUploadResult {
+            vk_string: format!("photo{}_{}", p_owner, pid),
+            preview_url,
+            full_url,
+        })
     }
 
     pub async fn schedule_wall_post(
