@@ -86,6 +86,11 @@ export interface TranslationSchema {
 	deleteModeTitle: string;
 	deleteModeTrash: string;
 	deleteModePermanent: string;
+	clearDbBtn: string;
+	clearDbConfirmTitle: string;
+	clearDbConfirmText: string;
+	githubBtn: string;
+	boostyBtn: string;
 	batchTitle: string;
 	batchDropzone: string;
 	batchDropzoneSub: string;
@@ -113,6 +118,10 @@ export interface TranslationSchema {
 	loadVkPhotos: string;
 	livePreview: string;
 	previewTitle: string;
+	wallViewerTitle: string;
+	scanWallBtn: string;
+	loadMoreBtn: string;
+	wallPostBadge: string;
 }
 
 export const translations: Record<Lang, TranslationSchema> = {
@@ -159,11 +168,11 @@ export const translations: Record<Lang, TranslationSchema> = {
 		localQueue: "Локальная",
 		vkDelayed: "Отложка ВК",
 		history: "История",
-		allPostsTab: "Все посты",
+		allPostsTab: "Просмотр стены",
 		emptyQueue: "Очередь пуста",
 		emptyVk: "В отложке ВК нет постов",
 		emptyHistory: "История постов пуста",
-		emptyAllPosts: "В базе данных нет постов",
+		emptyAllPosts: "На стене нет постов",
 		actions: "Действия:",
 		toEditor: "В редактор",
 		revertToLocal: "Вернуть в локальную очередь",
@@ -205,6 +214,12 @@ export const translations: Record<Lang, TranslationSchema> = {
 		deleteModeTitle: "Очистка файлов с диска",
 		deleteModeTrash: "В корзину",
 		deleteModePermanent: "Безвозвратно",
+		clearDbBtn: "Очистить базу данных (кроме токенов)",
+		clearDbConfirmTitle: "Очистка базы данных",
+		clearDbConfirmText:
+			"Вы действительно хотите удалить все локальные посты, очереди и историю? Токены и аккаунты сохранятся.",
+		githubBtn: "Github проекта",
+		boostyBtn: "Поддержать автора (Boosty)",
 		batchTitle: "Пакетная генерация очереди",
 		batchDropzone: "Перетащите неограниченное число изображений",
 		batchDropzoneSub: "или нажмите для выбора сразу десятков файлов",
@@ -233,6 +248,10 @@ export const translations: Record<Lang, TranslationSchema> = {
 		loadVkPhotos: "Загрузить фото из ВК",
 		livePreview: "Предпросмотр",
 		previewTitle: "Предпросмотр поста на стене ВКонтакте",
+		wallViewerTitle: "Просмотр стены сообщества",
+		scanWallBtn: "Сканировать стену",
+		loadMoreBtn: "Загрузить ещё",
+		wallPostBadge: "Стена ВК",
 	},
 	en: {
 		appTitle: "VK Post Studio",
@@ -276,11 +295,11 @@ export const translations: Record<Lang, TranslationSchema> = {
 		localQueue: "Local",
 		vkDelayed: "VK Scheduled",
 		history: "History",
-		allPostsTab: "All Posts",
+		allPostsTab: "Wall Viewer",
 		emptyQueue: "Queue is empty",
 		emptyVk: "No postponed posts in VK",
 		emptyHistory: "Post history is empty",
-		emptyAllPosts: "No posts in database",
+		emptyAllPosts: "No posts on the wall",
 		actions: "Actions:",
 		toEditor: "To Editor",
 		revertToLocal: "Revert to local queue",
@@ -321,6 +340,12 @@ export const translations: Record<Lang, TranslationSchema> = {
 		deleteModeTitle: "Disk cleaning mode",
 		deleteModeTrash: "Move to Trash",
 		deleteModePermanent: "Delete permanently",
+		clearDbBtn: "Clear Database (except tokens)",
+		clearDbConfirmTitle: "Clear Database",
+		clearDbConfirmText:
+			"Are you sure you want to delete all local posts, queues, and history? Your tokens will remain.",
+		githubBtn: "Github",
+		boostyBtn: "Support (Boosty)",
 		batchTitle: "Batch Queue Generator",
 		batchDropzone: "Drop unlimited images here",
 		batchDropzoneSub: "or click to select dozens of files",
@@ -349,5 +374,9 @@ export const translations: Record<Lang, TranslationSchema> = {
 		loadVkPhotos: "Download photos from VK",
 		livePreview: "Preview",
 		previewTitle: "VK Wall Post Live Preview",
+		wallViewerTitle: "Community Wall Viewer",
+		scanWallBtn: "Scan Wall",
+		loadMoreBtn: "Load More",
+		wallPostBadge: "VK Wall",
 	},
 };

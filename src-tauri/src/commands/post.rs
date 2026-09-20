@@ -39,6 +39,16 @@ pub struct PostDto {
     pub attachments: Vec<AttachmentDto>,
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+pub struct LiveWallPostDto {
+    pub vk_post_id: i64,
+    pub date_utc: String,
+    pub text: String,
+    pub attachments_count: i64,
+    pub app_post_id: Option<i64>,
+    pub preview_urls: Vec<String>,
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct SyncResultDto {
     pub posts: Vec<PostDto>,
@@ -139,7 +149,7 @@ async fn get_attachments_for_post(db: &sqlx::SqlitePool, post_id: i64, thumbs_di
 pub async fn get_queue(target_id: i64, app: AppHandle, state: State<'_, AppState>) -> Result<Vec<PostDto>, String> {
     let posts_rows = sqlx::query(
         "SELECT p.id, p.target_id, t.title as target_title, p.text, p.scheduled_at_utc, p.status, p.error_message, p.attachments_view_mode,
-                p.signed, p.close_comments, p.mute_notifications, p.mark_as_ads, p.vk_post_id 
+                p.signed, p.close_comments, p.mute_notifications, p.mark_as_ads, p.vk_post_id, p.guid 
          FROM posts p
          JOIN targets t ON p.target_id = t.id
          WHERE t.owner_id = (SELECT owner_id FROM targets WHERE id = ?) 
@@ -167,11 +177,11 @@ pub async fn get_queue(target_id: i64, app: AppHandle, state: State<'_, AppState
 pub async fn get_post_history(target_id: i64, app: AppHandle, state: State<'_, AppState>) -> Result<Vec<PostDto>, String> {
     let posts_rows = sqlx::query(
         "SELECT p.id, p.target_id, t.title as target_title, p.text, p.scheduled_at_utc, p.status, p.error_message, p.attachments_view_mode,
-                p.signed, p.close_comments, p.mute_notifications, p.mark_as_ads, p.vk_post_id 
+                p.signed, p.close_comments, p.mute_notifications, p.mark_as_ads, p.vk_post_id, p.guid 
          FROM posts p
          JOIN targets t ON p.target_id = t.id
          WHERE t.owner_id = (SELECT owner_id FROM targets WHERE id = ?)
-         ORDER BY datetime(p.scheduled_at_utc) ASC"
+         ORDER BY datetime(p.scheduled_at_utc) DESC"
     )
     .bind(target_id)
     .fetch_all(&state.db)
@@ -190,34 +200,13 @@ pub async fn get_post_history(target_id: i64, app: AppHandle, state: State<'_, A
     Ok(result)
 }
 
+// Запрос постов стены напрямую из VK API без сохранения в SQLite
 #[tauri::command]
-pub async fn get_all_posts(app: AppHandle, state: State<'_, AppState>) -> Result<Vec<PostDto>, String> {
-    let posts_rows = sqlx::query(
-        "SELECT p.id, p.target_id, COALESCE(t.title, 'Неизвестная цель') as target_title, 
-                p.text, p.scheduled_at_utc, p.status, p.error_message, p.attachments_view_mode,
-                p.signed, p.close_comments, p.mute_notifications, p.mark_as_ads, p.vk_post_id 
-         FROM posts p
-         LEFT JOIN targets t ON p.target_id = t.id
-         ORDER BY p.id DESC"
-    )
-    .fetch_all(&state.db)
-    .await
-    .map_err(|e| e.to_string())?;
-
-    let thumbs_dir = get_thumbs_dir(&app);
-    let mut result = Vec::new();
-
-    for r in posts_rows {
-        let post_id: i64 = r.try_get("id").unwrap_or(0);
-        let attachments = get_attachments_for_post(&state.db, post_id, &thumbs_dir).await;
-        result.push(map_post_row(&r, attachments));
-    }
-
-    Ok(result)
-}
-
-#[tauri::command]
-pub async fn sync_vk_wall_posts(target_id: i64, offset: u32, state: State<'_, AppState>) -> Result<usize, String> {
+pub async fn fetch_live_wall_posts(
+    target_id: i64,
+    offset: u32,
+    state: State<'_, AppState>,
+) -> Result<Vec<LiveWallPostDto>, String> {
     let target_row = sqlx::query("SELECT account_id, owner_id FROM targets WHERE id = ?")
         .bind(target_id)
         .fetch_one(&state.db)
@@ -234,68 +223,85 @@ pub async fn sync_vk_wall_posts(target_id: i64, offset: u32, state: State<'_, Ap
         .map_err(|e| e.to_string())?;
 
     let token: String = token_row.get("token");
-    let vk = VkClient::new(token);
+    let client = reqwest::Client::new();
+    let url = format!(
+        "https://api.vk.com/method/wall.get?access_token={}&v=5.131&owner_id={}&filter=owner&count=30&offset={}",
+        token, owner_id, offset
+    );
 
-    let wall_posts = vk.get_wall_posts(owner_id, 30, offset).await.map_err(|e| e.to_string())?;
-    let mut added_count = 0;
+    let res_val: serde_json::Value = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .json()
+        .await
+        .map_err(|e| e.to_string())?;
 
-    for item in wall_posts {
-        let exists = sqlx::query("SELECT id FROM posts WHERE vk_post_id = ?")
-            .bind(item.id)
-            .fetch_optional(&state.db)
-            .await
-            .map_err(|e| e.to_string())?;
-
-        let sched_dt = chrono::DateTime::from_timestamp(item.date, 0)
-            .unwrap_or_else(chrono::Utc::now)
-            .to_rfc3339();
-        let text = item.text.unwrap_or_default();
-
-        if let Some(row) = exists {
-            let pid: i64 = row.get("id");
-            sqlx::query("UPDATE posts SET status = 'published', scheduled_at_utc = ? WHERE id = ?")
-                .bind(&sched_dt)
-                .bind(pid)
-                .execute(&state.db)
-                .await
-                .ok();
-        } else {
-            let guid = format!("vk_ext_{}_{}", target_id, item.id);
-            let new_pid = sqlx::query(
-                "INSERT INTO posts (
-                    account_id, target_id, pattern_id, text, scheduled_at_utc, guid,
-                    status, vk_post_id, signed, close_comments, mute_notifications, mark_as_ads, attachments_view_mode
-                ) VALUES (
-                    ?, ?, 1, ?, ?, ?, 'published', ?, 0, 0, 0, 0, 'grid'
-                ) RETURNING id"
-            )
-            .bind(account_id)
-            .bind(target_id)
-            .bind(&text)
-            .bind(&sched_dt)
-            .bind(&guid)
-            .bind(item.id)
-            .fetch_one(&state.db)
-            .await
-            .map_err(|e| e.to_string())?
-            .get::<i64, _>("id");
-
-            for i in 0..item.attachments_count {
-                sqlx::query(
-                    "INSERT INTO attachments (post_id, file_name, size_bytes, attachment_kind, upload_status, order_index)
-                     VALUES (?, 'vk_media', 0, 'photo', 'uploaded', ?)"
-                )
-                .bind(new_pid)
-                .bind(i as i32)
-                .execute(&state.db)
-                .await
-                .ok();
-            }
-            added_count += 1;
-        }
+    // Извлекаем код и сообщение ошибки VK без сырого вывода JSON
+    if let Some(err_obj) = res_val.get("error") {
+        let code = err_obj.get("error_code").and_then(|v| v.as_i64()).unwrap_or(0);
+        let msg = err_obj.get("error_msg").and_then(|v| v.as_str()).unwrap_or("Неизвестная ошибка VK API");
+        return Err(format!("VK API error {}: {}", code, msg));
     }
 
-    Ok(added_count)
+    let items_arr = res_val
+        .get("response")
+        .and_then(|r| r.get("items"))
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| "Некорректный ответ от серверов VK".to_string())?;
+
+    let mut result = Vec::new();
+
+    for item in items_arr {
+        let vk_post_id = item.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
+        let date = item.get("date").and_then(|v| v.as_i64()).unwrap_or(0);
+        let text = item.get("text").and_then(|v| v.as_str()).unwrap_or("").to_string();
+
+        if vk_post_id <= 0 || date <= 0 {
+            continue;
+        }
+
+        let date_utc = chrono::DateTime::from_timestamp(date, 0)
+            .unwrap_or_else(chrono::Utc::now)
+            .to_rfc3339();
+
+        let mut preview_urls = Vec::new();
+        if let Some(atts) = item.get("attachments").and_then(|v| v.as_array()) {
+            for att in atts {
+                if att.get("type").and_then(|v| v.as_str()) == Some("photo") {
+                    if let Some(photo) = att.get("photo") {
+                        if let Some(sizes) = photo.get("sizes").and_then(|v| v.as_array()) {
+                            if let Some(best) = sizes.last().and_then(|s| s.get("url")).and_then(|u| u.as_str()) {
+                                preview_urls.push(best.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let app_post_id: Option<i64> = sqlx::query_scalar(
+            "SELECT id FROM posts WHERE vk_post_id = ? AND target_id = ? LIMIT 1"
+        )
+        .bind(vk_post_id)
+        .bind(target_id)
+        .fetch_optional(&state.db)
+        .await
+        .ok()
+        .flatten();
+
+        result.push(LiveWallPostDto {
+            vk_post_id,
+            date_utc,
+            text,
+            attachments_count: preview_urls.len() as i64,
+            app_post_id,
+            preview_urls,
+        });
+    }
+
+    Ok(result)
 }
 
 #[tauri::command]
@@ -320,7 +326,11 @@ pub async fn fetch_vk_post_photos(
         .map_err(|e| e.to_string())?;
 
     let token: String = token_row.get("token");
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .unwrap_or_default();
+
     let post_query = format!("{}_{}", owner_id, vk_post_id);
 
     let request_url = format!(
@@ -337,13 +347,27 @@ pub async fn fetch_vk_post_photos(
         .await
         .map_err(|e| e.to_string())?;
 
+    // Извлекаем код и сообщение об ошибке VK без вывода сырого JSON-объекта
+    if let Some(err_obj) = res_val.get("error") {
+        let code = err_obj.get("error_code").and_then(|v| v.as_i64()).unwrap_or(0);
+        let msg = err_obj
+            .get("error_msg")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Неизвестная ошибка VK API");
+        return Err(format!("VK API error {}: {}", code, msg));
+    }
+
     let posts_arr = res_val
         .get("response")
         .and_then(|v| v.as_array())
-        .ok_or_else(|| format!("VK API error: {:?}", res_val.get("error")))?;
+        .ok_or_else(|| "Некорректный ответ от серверов VK".to_string())?;
 
     let post_obj = posts_arr.first().ok_or_else(|| "Пост не найден в ВК".to_string())?;
-    let attachments = post_obj.get("attachments").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    let attachments = post_obj
+        .get("attachments")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
 
     let mut result = Vec::new();
 
@@ -364,8 +388,16 @@ pub async fn fetch_vk_post_photos(
                                         let triple = (b0 << 16) | (b1 << 8) | b2;
                                         b64.push(CHARSET[(triple >> 18) & 0x3F] as char);
                                         b64.push(CHARSET[(triple >> 12) & 0x3F] as char);
-                                        if chunk.len() > 1 { b64.push(CHARSET[(triple >> 6) & 0x3F] as char); } else { b64.push('='); }
-                                        if chunk.len() > 2 { b64.push(CHARSET[triple & 0x3F] as char); } else { b64.push('='); }
+                                        if chunk.len() > 1 {
+                                            b64.push(CHARSET[(triple >> 6) & 0x3F] as char);
+                                        } else {
+                                            b64.push('=');
+                                        }
+                                        if chunk.len() > 2 {
+                                            b64.push(CHARSET[triple & 0x3F] as char);
+                                        } else {
+                                            b64.push('=');
+                                        }
                                     }
 
                                     result.push(DownloadedVkPhotoDto {
@@ -493,7 +525,6 @@ pub async fn sync_vk_delayed_posts(target_id: i64, app: AppHandle, state: State<
                         .map(|d| d.with_timezone(&chrono::Utc))
                         .unwrap_or(now_utc);
 
-                    // Если дата ещё в будущем, пост удалён из отложки ВК
                     let new_status = if sched_dt > (now_utc + chrono::Duration::minutes(1)) {
                         "deleted_in_vk"
                     } else {

@@ -53,45 +53,40 @@ pub fn run() {
                     }
                 }
 
-                // Миграция схемы: снятие жесткого CHECK constraint для поддержки статусов published и deleted_in_vk
-                let table_sql: Option<String> = sqlx::query_scalar(
-                    "SELECT sql FROM sqlite_master WHERE type='table' AND name='posts'"
+                // Исправление поврежденных внешних ключей к _posts_old
+                let _ = sqlx::query("PRAGMA foreign_keys = OFF;").execute(&pool).await;
+
+                let att_sql: Option<String> = sqlx::query_scalar(
+                    "SELECT sql FROM sqlite_master WHERE type='table' AND name='attachments'"
                 ).fetch_optional(&pool).await.ok().flatten();
 
-                if let Some(sql) = table_sql {
-                    if sql.contains("CHECK") && !sql.contains("'published'") {
-                        let _ = sqlx::query("PRAGMA foreign_keys=OFF;").execute(&pool).await;
-                        let _ = sqlx::query("ALTER TABLE posts RENAME TO _posts_old;").execute(&pool).await;
+                if let Some(sql) = att_sql {
+                    if sql.contains("_posts_old") {
+                        let _ = sqlx::query("ALTER TABLE attachments RENAME TO _att_broken;").execute(&pool).await;
                         let _ = sqlx::query(
-                            "CREATE TABLE posts (
+                            "CREATE TABLE attachments (
                                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                                account_id INTEGER NOT NULL,
-                                target_id INTEGER NOT NULL,
-                                pattern_id INTEGER NOT NULL,
-                                text TEXT NOT NULL,
-                                scheduled_at_utc TEXT NOT NULL,
-                                guid TEXT NOT NULL UNIQUE,
-                                status TEXT NOT NULL DEFAULT 'queued',
-                                vk_post_id INTEGER,
-                                signed INTEGER NOT NULL DEFAULT 0,
-                                close_comments INTEGER NOT NULL DEFAULT 0,
-                                mute_notifications INTEGER NOT NULL DEFAULT 0,
-                                mark_as_ads INTEGER NOT NULL DEFAULT 0,
-                                attachments_view_mode TEXT NOT NULL DEFAULT 'grid',
-                                error_message TEXT,
-                                created_at_utc TEXT NOT NULL DEFAULT (datetime('now'))
+                                post_id INTEGER NOT NULL,
+                                file_name TEXT NOT NULL,
+                                size_bytes INTEGER NOT NULL,
+                                attachment_kind TEXT NOT NULL,
+                                upload_status TEXT NOT NULL DEFAULT 'pending',
+                                vk_attachment_string TEXT,
+                                local_path TEXT,
+                                order_index INTEGER NOT NULL DEFAULT 0,
+                                FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE
                             );"
                         ).execute(&pool).await;
-
-                        let _ = sqlx::query(
-                            "INSERT INTO posts (id, account_id, target_id, pattern_id, text, scheduled_at_utc, guid, status, vk_post_id, signed, close_comments, mute_notifications, mark_as_ads, attachments_view_mode, error_message, created_at_utc)
-                             SELECT id, account_id, target_id, pattern_id, text, scheduled_at_utc, guid, status, vk_post_id, signed, close_comments, mute_notifications, mark_as_ads, attachments_view_mode, error_message, created_at_utc FROM _posts_old;"
-                        ).execute(&pool).await;
-
-                        let _ = sqlx::query("DROP TABLE _posts_old;").execute(&pool).await;
-                        let _ = sqlx::query("PRAGMA foreign_keys=ON;").execute(&pool).await;
+                        let _ = sqlx::query("INSERT INTO attachments SELECT * FROM _att_broken;").execute(&pool).await;
+                        let _ = sqlx::query("DROP TABLE _att_broken;").execute(&pool).await;
                     }
                 }
+
+                // Очистка постов, ошибочно импортированных со стены в прошлых сессиях
+                let _ = sqlx::query("DELETE FROM attachments WHERE post_id IN (SELECT id FROM posts WHERE guid LIKE 'vk_ext_%');").execute(&pool).await;
+                let _ = sqlx::query("DELETE FROM posts WHERE guid LIKE 'vk_ext_%';").execute(&pool).await;
+
+                let _ = sqlx::query("PRAGMA foreign_keys = ON;").execute(&pool).await;
 
                 let _ = sqlx::query("ALTER TABLE posts ADD COLUMN signed INTEGER NOT NULL DEFAULT 0").execute(&pool).await;
                 let _ = sqlx::query("ALTER TABLE posts ADD COLUMN close_comments INTEGER NOT NULL DEFAULT 0").execute(&pool).await;
@@ -140,9 +135,8 @@ pub fn run() {
             commands::pattern::reschedule_post_custom,
             commands::post::get_queue,
             commands::post::get_post_history,
-            commands::post::get_all_posts,
-            commands::post::sync_vk_wall_posts,
             commands::post::fetch_vk_post_photos,
+            commands::post::fetch_live_wall_posts,
             commands::post::sync_vk_delayed_posts,
             commands::post::revert_vk_post_to_local_same_time,
             commands::post::revert_vk_post_to_local_next_slot,

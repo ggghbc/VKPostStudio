@@ -13,9 +13,10 @@ import {
 	RescheduleModal,
 	LightboxModal,
 	SettingsModal,
-	AllPostsModal,
+	WallViewerModal,
 	DeleteConfirmModal,
 	CleanDiskModal,
+	ClearDatabaseConfirmModal,
 	VkLivePreviewModal,
 	NoticeModal,
 } from "./components/Modals";
@@ -27,6 +28,7 @@ import {
 	PostItem,
 	FilePreview,
 	Theme,
+	LiveWallPostItem,
 } from "./types";
 import { Lang, translations } from "./services/i18n";
 import { format } from "date-fns";
@@ -68,7 +70,6 @@ export default function App() {
 
 	const [queue, setQueue] = useState<PostItem[]>([]);
 	const [historyPosts, setHistoryPosts] = useState<PostItem[]>([]);
-	const [allPosts, setAllPosts] = useState<PostItem[]>([]);
 	const [activeQueueTab, setActiveQueueTab] = useState<
 		"local" | "vk" | "history"
 	>("local");
@@ -78,8 +79,6 @@ export default function App() {
 	const [expandedPostIds, setExpandedPostIds] = useState<number[]>([]);
 	const [nextSlotDisplay, setNextSlotDisplay] = useState<string>("Расчет...");
 	const [isSyncingVk, setIsSyncingVk] = useState(false);
-	const [isSyncingWall, setIsSyncingWall] = useState(false);
-	const [wallOffset, setWallOffset] = useState<number>(0);
 	const [isRightPanelOpen, setIsRightPanelOpen] = useState(true);
 
 	const [editingPostId, setEditingPostId] = useState<number | null>(null);
@@ -129,6 +128,12 @@ export default function App() {
 
 	const [showLivePreviewModal, setShowLivePreviewModal] = useState(false);
 
+	// Просмотр стены сообщества ВК
+	const [showWallModal, setShowWallModal] = useState(false);
+	const [wallPosts, setWallPosts] = useState<LiveWallPostItem[]>([]);
+	const [isSyncingWall, setIsSyncingWall] = useState(false);
+	const [wallOffset, setWallOffset] = useState<number>(0);
+
 	// Просмотр поста из календаря
 	const [calendarDetailPost, setCalendarDetailPost] =
 		useState<PostItem | null>(null);
@@ -138,17 +143,21 @@ export default function App() {
 		message: string;
 	} | null>(null);
 
+	// Сессионное подтверждение удаления
 	const [skipDeleteConfirmSession, setSkipDeleteConfirmSession] =
 		useState(false);
 	const [postToDelete, setPostToDelete] = useState<PostItem | null>(null);
 
+	// Очистка диска
 	const [showCleanDiskModal, setShowCleanDiskModal] = useState(false);
 	const [cleanedDiskCount, setCleanedDiskCount] = useState<number | null>(
 		null,
 	);
 	const [isCleaningDisk, setIsCleaningDisk] = useState(false);
 
-	const [showAllPostsModal, setShowAllPostsModal] = useState(false);
+	// Подтверждение очистки базы данных
+	const [showClearDbConfirmModal, setShowClearDbConfirmModal] =
+		useState(false);
 
 	const [commentsOnPost, setCommentsOnPost] = useState(true);
 	const [notifyFollowers, setNotifyFollowers] = useState(true);
@@ -247,15 +256,8 @@ export default function App() {
 		}
 	};
 
-	const handleClearDatabase = async () => {
-		if (
-			!confirm(
-				lang === "ru"
-					? "Вы уверены? Будут удалены все локальные очереди, посты и история. Токены останутся."
-					: "Are you sure? All posts and queues will be deleted. Tokens will remain.",
-			)
-		)
-			return;
+	const handleExecuteClearDatabase = async () => {
+		setShowClearDbConfirmModal(false);
 		try {
 			await api.clearDatabaseExceptTokens();
 			if (selectedTargetId) syncVkQueue(selectedTargetId);
@@ -521,15 +523,6 @@ export default function App() {
 		}
 	};
 
-	const loadAllPosts = async () => {
-		try {
-			const all = await api.getAllPosts();
-			setAllPosts(all);
-		} catch (e) {
-			console.error(e);
-		}
-	};
-
 	const syncVkQueue = async (tId: number) => {
 		setIsSyncingVk(true);
 		const safetyTimer = setTimeout(() => setIsSyncingVk(false), 14000);
@@ -537,14 +530,12 @@ export default function App() {
 			const res = await api.syncVkQueue(tId);
 			setQueue(res.posts);
 			await loadHistory(tId);
-			await loadAllPosts();
 		} catch (e) {
 			console.error(e);
 			try {
 				const q = await api.getQueue(tId);
 				setQueue(q);
 				await loadHistory(tId);
-				await loadAllPosts();
 			} catch {}
 		} finally {
 			clearTimeout(safetyTimer);
@@ -552,23 +543,23 @@ export default function App() {
 		}
 	};
 
-	const handleSyncWallPosts = async (
+	// Загрузка стены в память компонента
+	const handleScanWall = async (
 		targetId: number,
 		isLoadMore: boolean = false,
 	) => {
 		setIsSyncingWall(true);
 		const nextOffset = isLoadMore ? wallOffset + 30 : 0;
 		try {
-			const count = await api.syncWallPosts(targetId, nextOffset);
+			const posts = await api.fetchLiveWallPosts(targetId, nextOffset);
 			setWallOffset(nextOffset);
-			await loadHistory(targetId);
-			await loadAllPosts();
-			setNotice({
-				title: lang === "ru" ? "Стена сообщества" : "Community Wall",
-				message: `${lang === "ru" ? "Загружено постов со стены:" : "Posts synced from wall:"} ${count}`,
-			});
+			if (isLoadMore) {
+				setWallPosts((prev) => [...prev, ...posts]);
+			} else {
+				setWallPosts(posts);
+			}
 		} catch (e) {
-			setNotice({ title: "Ошибка", message: String(e) });
+			showApiError(e, "Ошибка связи с ВК", "VK Connection Error");
 		} finally {
 			setIsSyncingWall(false);
 		}
@@ -580,8 +571,9 @@ export default function App() {
 				"vk_selected_target",
 				selectedTargetId.toString(),
 			);
-			setWallOffset(0);
 			syncVkQueue(selectedTargetId);
+			setWallOffset(0);
+			setWallPosts([]);
 		}
 	}, [selectedTargetId]);
 
@@ -704,9 +696,8 @@ export default function App() {
 
 	const executeDeletePost = async (post: PostItem) => {
 		const pid = post.id;
-		setQueue((prev) => prev.filter((p) => p.id !== pid));
-		setHistoryPosts((prev) => prev.filter((p) => p.id !== pid));
-		setAllPosts((prev) => prev.filter((p) => p.id !== pid));
+		setQueue((prev: PostItem[]) => prev.filter((p) => p.id !== pid));
+		setHistoryPosts((prev: PostItem[]) => prev.filter((p) => p.id !== pid));
 
 		if (post.status === "transferred_to_vk") {
 			await api.deleteVkPost(pid).catch(console.error);
@@ -794,9 +785,8 @@ export default function App() {
 
 			setQueue(updater);
 			setHistoryPosts(updater);
-			setAllPosts(updater);
 		} catch (e) {
-			setNotice({ title: "Ошибка", message: String(e) });
+			showApiError(e, "Ошибка загрузки фото", "Error Loading Photos");
 		}
 	};
 
@@ -827,6 +817,40 @@ export default function App() {
 				: historyPosts;
 	const currentTarget = targets.find((t) => t.id === selectedTargetId);
 
+	// Функция локализованной обработки ошибок VK API
+	const showApiError = (
+		err: any,
+		fallbackTitleRu: string,
+		fallbackTitleEn: string,
+	) => {
+		const errStr = String(err || "");
+		const isTokenError =
+			errStr.includes("error 5") ||
+			errStr.includes('error_code": 5') ||
+			errStr.includes("Number(5)") ||
+			errStr.includes("User authorization failed") ||
+			errStr.includes("another ip address");
+
+		if (isTokenError) {
+			setNotice({
+				title:
+					lang === "ru"
+						? "Требуется обновить токен"
+						: "Token Update Required",
+				message:
+					lang === "ru"
+						? "Срок действия токена истёк или изменился IP-адрес (например, из-за VPN). Пожалуйста, удалите недействительный токен и добавьте новый через кнопку «+ Добавить токен» в шапке приложения."
+						: "The access token has expired or your IP address has changed (e.g. due to VPN). Please delete the invalid token and add a new one via '+ Add Token' in the header.",
+			});
+			return;
+		}
+
+		setNotice({
+			title: lang === "ru" ? fallbackTitleRu : fallbackTitleEn,
+			message: errStr,
+		});
+	};
+
 	return (
 		<div
 			className="flex flex-col h-screen relative"
@@ -851,14 +875,16 @@ export default function App() {
 					loadAccounts();
 				}}
 				onOpenTokenModal={() => setShowTokenModal(true)}
-				onSelectTarget={(id) => {
+				onSelectTarget={(id: number) => {
 					setSelectedTargetId(id);
 					localStorage.setItem("vk_selected_target", id.toString());
 				}}
 				onOpenSettings={() => setShowSettingsModal(true)}
-				onOpenAllPostsModal={async () => {
-					await loadAllPosts();
-					setShowAllPostsModal(true);
+				onOpenAllPostsModal={() => {
+					setShowWallModal(true);
+					if (selectedTargetId && wallPosts.length === 0) {
+						handleScanWall(selectedTargetId, false);
+					}
 				}}
 				onToggleRightPanel={() =>
 					setIsRightPanelOpen(!isRightPanelOpen)
@@ -1191,7 +1217,7 @@ export default function App() {
 				onClose={() => setShowLivePreviewModal(false)}
 			/>
 
-			{/* Окно сообщений поверх всех диалогов */}
+			{/* Окно сообщений поверх всех окон */}
 			<NoticeModal
 				show={notice !== null}
 				title={notice?.title || ""}
@@ -1206,6 +1232,13 @@ export default function App() {
 				onConfirm={handleConfirmDeleteDialog}
 			/>
 
+			<ClearDatabaseConfirmModal
+				show={showClearDbConfirmModal}
+				lang={lang}
+				onClose={() => setShowClearDbConfirmModal(false)}
+				onConfirm={handleExecuteClearDatabase}
+			/>
+
 			<CleanDiskModal
 				show={showCleanDiskModal}
 				lang={lang}
@@ -1215,29 +1248,26 @@ export default function App() {
 				onConfirmClean={handleExecuteCleanDisk}
 			/>
 
-			{/* Окно "Все посты" с выбором цели и пагинацией */}
-			<AllPostsModal
-				show={showAllPostsModal}
+			{/* Окно «Просмотр стены» */}
+			<WallViewerModal
+				show={showWallModal}
 				lang={lang}
-				posts={allPosts}
+				wallPosts={wallPosts}
 				isSyncingWall={isSyncingWall}
 				targets={targets}
 				selectedTargetId={selectedTargetId}
 				onSelectTarget={(id: number) => {
 					setSelectedTargetId(id);
 					localStorage.setItem("vk_selected_target", id.toString());
+					handleScanWall(id, false);
 				}}
-				onClose={() => setShowAllPostsModal(false)}
-				onDeletePost={handleDeleteRequest}
+				onClose={() => setShowWallModal(false)}
 				onOpenFullImage={setFullViewImage}
-				onLoadVkPhotos={handleLoadVkPhotos}
-				onSyncWallPosts={() =>
-					selectedTargetId &&
-					handleSyncWallPosts(selectedTargetId, false)
+				onScanWall={() =>
+					selectedTargetId && handleScanWall(selectedTargetId, false)
 				}
-				onLoadMoreWallPosts={() =>
-					selectedTargetId &&
-					handleSyncWallPosts(selectedTargetId, true)
+				onLoadMore={() =>
+					selectedTargetId && handleScanWall(selectedTargetId, true)
 				}
 			/>
 
@@ -1261,7 +1291,7 @@ export default function App() {
 					});
 				}}
 				onCleanExpiredTokens={handleCleanExpiredTokens}
-				onClearDatabase={handleClearDatabase}
+				onRequestClearDatabase={() => setShowClearDbConfirmModal(true)}
 			/>
 
 			<TokenModal
@@ -1351,6 +1381,7 @@ export default function App() {
 				onDeletePattern={handleDeletePattern}
 			/>
 
+			{/* Окно пакетной генерации */}
 			<BatchModal
 				show={showBatchModal}
 				lang={lang}

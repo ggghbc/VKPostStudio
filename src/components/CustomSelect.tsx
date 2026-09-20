@@ -14,6 +14,7 @@ interface CustomSelectProps {
 	maxWidth?: string;
 	icon?: React.ReactNode;
 	dropUp?: boolean;
+	alignRight?: boolean;
 }
 
 export const CustomSelect: React.FC<CustomSelectProps> = ({
@@ -24,6 +25,7 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
 	maxWidth = "280px",
 	icon,
 	dropUp = false,
+	alignRight = false,
 }) => {
 	const [isOpen, setIsOpen] = useState(false);
 	const ref = useRef<HTMLDivElement>(null);
@@ -50,7 +52,7 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
 			<button
 				type="button"
 				onClick={() => setIsOpen(!isOpen)}
-				className="w-full flex items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-xs font-semibold border transition-all focus:outline-none cursor-pointer"
+				className="w-full flex items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-xs font-semibold border transition-all focus:outline-none cursor-pointer select-none"
 				style={{
 					backgroundColor: "var(--bg-surface-sub)",
 					color: "var(--text-app)",
@@ -71,13 +73,13 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
 
 			{isOpen && (
 				<div
-					className={`absolute left-0 w-full min-w-[200px] max-h-56 overflow-y-auto rounded-xl border p-1 shadow-2xl z-50 animate-in fade-in duration-100 ${
+					className={`absolute ${alignRight ? "right-0" : "left-0"} w-full min-w-[210px] max-h-56 overflow-y-auto rounded-xl border p-1 shadow-2xl z-[90] animate-in fade-in duration-100 ${
 						dropUp ? "bottom-full mb-1" : "top-full mt-1"
 					}`}
 					style={{
 						backgroundColor: "var(--bg-surface)",
 						borderColor: "var(--border-light)",
-						boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.4)",
+						boxShadow: "0 10px 30px rgba(0, 0, 0, 0.5)",
 					}}
 				>
 					{options.map((opt) => {

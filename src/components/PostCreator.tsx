@@ -148,7 +148,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 
 	return (
 		<section
-			className={`flex flex-col border-r p-4 sm:p-5 overflow-y-auto transition-all duration-300 ease-in-out ${
+			className={`flex flex-col border-r p-4 sm:p-5 overflow-y-auto overflow-x-hidden relative z-10 transition-all duration-300 ease-in-out ${
 				isRightPanelOpen
 					? "w-1/2"
 					: "w-full max-w-4xl mx-auto border-r-0"
@@ -158,7 +158,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 				borderColor: "var(--border-app)",
 			}}
 		>
-			<div className="mb-2 flex items-center justify-between flex-shrink-0">
+			<div className="mb-2 flex items-center justify-between flex-shrink-0 relative z-20">
 				<div className="flex items-center gap-2">
 					<h2
 						className="text-sm font-semibold tracking-wide"
@@ -182,6 +182,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 					) : (
 						<div className="flex items-center gap-1.5">
 							<button
+								type="button"
 								onClick={onOpenBatchModal}
 								className="p-1.5 rounded-lg border hover:opacity-80 transition-all cursor-pointer"
 								style={{
@@ -195,6 +196,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 							</button>
 
 							<button
+								type="button"
 								onClick={onOpenLivePreview}
 								className="p-1.5 rounded-lg border hover:opacity-80 transition-all cursor-pointer"
 								style={{
@@ -210,7 +212,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 					)}
 				</div>
 
-				{/* Список паттернов без двойной рамки */}
+				{/* Выпадающий список паттернов с привязкой по правому краю */}
 				<div className="flex items-center gap-1.5">
 					<CustomSelect
 						value={selectedPatternId || ""}
@@ -219,7 +221,8 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 							label: `${p.name}${p.interval_days > 1 ? ` (раз в ${p.interval_days} дн.)` : ""}`,
 						}))}
 						onChange={(val) => onSelectPattern(Number(val))}
-						maxWidth="240px"
+						maxWidth="200px"
+						alignRight={true}
 						icon={
 							<Clock
 								className="h-3.5 w-3.5"
@@ -229,6 +232,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 					/>
 
 					<button
+						type="button"
 						onClick={onOpenPatternModal}
 						className="p-1.5 rounded-lg border hover:opacity-80 transition-colors cursor-pointer"
 						style={{
@@ -336,6 +340,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 							</div>
 
 							<button
+								type="button"
 								onClick={onSelectFiles}
 								disabled={attachedFiles.length >= 10}
 								className="flex items-center gap-1 text-[11px] font-medium disabled:opacity-40 hover:opacity-80 transition-opacity cursor-pointer"
@@ -399,12 +404,13 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 
 									<div className="absolute inset-x-0 bottom-0 py-0.5 bg-black/80 backdrop-blur-sm flex items-center justify-between px-1 border-t border-white/10">
 										<button
+											type="button"
 											disabled={idx === 0}
 											onClick={(e) => {
 												e.stopPropagation();
 												onMoveFile(idx, idx - 1);
 											}}
-											className="p-0.5 rounded hover:bg-white/20 text-white disabled:opacity-20 transition-colors"
+											className="p-0.5 rounded hover:bg-white/20 text-white disabled:opacity-20 transition-colors cursor-pointer"
 											title="Move left"
 										>
 											<ArrowLeft className="h-3 w-3" />
@@ -413,6 +419,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 											{t.position}
 										</span>
 										<button
+											type="button"
 											disabled={
 												idx === attachedFiles.length - 1
 											}
@@ -420,7 +427,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 												e.stopPropagation();
 												onMoveFile(idx, idx + 1);
 											}}
-											className="p-0.5 rounded hover:bg-white/20 text-white disabled:opacity-20 transition-colors"
+											className="p-0.5 rounded hover:bg-white/20 text-white disabled:opacity-20 transition-colors cursor-pointer"
 											title="Move right"
 										>
 											<ArrowRight className="h-3 w-3" />
@@ -428,11 +435,12 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 									</div>
 
 									<button
+										type="button"
 										onClick={(e) => {
 											e.stopPropagation();
 											onRemoveFile(idx);
 										}}
-										className="absolute top-1 right-1 p-1 rounded-full bg-black/70 hover:bg-rose-600 text-white shadow-lg backdrop-blur-sm transition-colors z-10"
+										className="absolute top-1 right-1 p-1 rounded-full bg-black/70 hover:bg-rose-600 text-white shadow-lg backdrop-blur-sm transition-colors z-10 cursor-pointer"
 										title="Delete"
 									>
 										<X className="h-3 w-3" />
@@ -444,7 +452,6 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 				)}
 			</div>
 
-			{/* Настройки публикации */}
 			<div
 				className="rounded-2xl border overflow-hidden select-none mb-2 flex-shrink-0"
 				style={{
@@ -453,6 +460,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 				}}
 			>
 				<button
+					type="button"
 					onClick={onToggleSettings}
 					className="w-full flex items-center justify-between p-2.5 text-xs font-semibold hover:opacity-80 transition-opacity cursor-pointer"
 					style={{ color: "var(--text-app)" }}
@@ -493,6 +501,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 								}}
 							>
 								<button
+									type="button"
 									onClick={() => onSetViewMode("grid")}
 									className="flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold transition-all cursor-pointer"
 									style={{
@@ -510,6 +519,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 									<span>{t.grid}</span>
 								</button>
 								<button
+									type="button"
 									onClick={() => onSetViewMode("carousel")}
 									className="flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold transition-all cursor-pointer"
 									style={{
@@ -681,6 +691,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 								{t.pubTime}
 							</span>
 							<button
+								type="button"
 								onClick={onToggleCalendar}
 								className="flex items-center gap-2 border rounded-xl px-2.5 py-1 text-xs font-mono focus:outline-none transition-colors cursor-pointer"
 								style={{
@@ -717,6 +728,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 								</span>
 								<div className="flex items-center gap-1">
 									<button
+										type="button"
 										onClick={() =>
 											onSetViewMonth(
 												subMonths(viewMonth, 1),
@@ -727,6 +739,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 										<CL className="h-4 w-4" />
 									</button>
 									<button
+										type="button"
 										onClick={() =>
 											onSetViewMonth(
 												addMonths(viewMonth, 1),
@@ -763,6 +776,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 									return (
 										<button
 											key={idx}
+											type="button"
 											onClick={() =>
 												onSetSelectedDate(day)
 											}
@@ -876,6 +890,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 
 							<div className="mt-3 flex justify-end">
 								<button
+									type="button"
 									onClick={onToggleCalendar}
 									className="w-full py-1.5 rounded-xl text-xs font-semibold shadow-md transition-all active:scale-95 cursor-pointer"
 									style={{
@@ -899,6 +914,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 			>
 				{editingPostId && (
 					<button
+						type="button"
 						onClick={onCancelEditing}
 						className="px-3.5 py-3 rounded-xl border font-semibold text-xs hover:opacity-80 transition-opacity cursor-pointer"
 						style={{
@@ -912,6 +928,7 @@ export const PostCreator: React.FC<PostCreatorProps> = ({
 				)}
 
 				<button
+					type="button"
 					onClick={onSavePost}
 					disabled={!selectedTargetId}
 					className="flex-1 flex items-center justify-center gap-2 rounded-xl py-3 text-xs sm:text-sm font-bold shadow-lg transition-all active:scale-[0.99] disabled:opacity-50 disabled:pointer-events-none cursor-pointer"

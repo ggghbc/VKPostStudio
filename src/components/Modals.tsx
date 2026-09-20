@@ -43,12 +43,20 @@ import {
 	Info,
 	RefreshCw,
 } from "lucide-react";
-import { open } from "@tauri-apps/plugin-dialog";
-import { PostItem, Theme, Pattern, Target, FilePreview } from "../types";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import {
+	PostItem,
+	Theme,
+	Pattern,
+	Target,
+	FilePreview,
+	LiveWallPostItem,
+} from "../types";
 import { translations, Lang } from "../services/i18n";
 import { CustomSelect } from "./CustomSelect";
 
-// Внутреннее окно оповещений вместо системного alert
+// Внутреннее всплывающее окно поверх всех окон
 export const NoticeModal: React.FC<{
 	show: boolean;
 	title: string;
@@ -57,7 +65,7 @@ export const NoticeModal: React.FC<{
 }> = ({ show, title, message, onClose }) => {
 	if (!show) return null;
 	return (
-		<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-[75] animate-in fade-in duration-150">
+		<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-[9999] animate-in fade-in duration-150">
 			<div
 				className="border rounded-2xl w-full max-w-sm p-5 shadow-2xl space-y-4"
 				style={{
@@ -79,7 +87,7 @@ export const NoticeModal: React.FC<{
 				</div>
 
 				<p
-					className="text-xs leading-relaxed"
+					className="text-xs leading-relaxed break-words"
 					style={{ color: "var(--text-muted)" }}
 				>
 					{message}
@@ -105,7 +113,6 @@ export const NoticeModal: React.FC<{
 	);
 };
 
-// Окно настроек приложения с очисткой БД и выбором типа удаления
 export const SettingsModal: React.FC<{
 	show: boolean;
 	theme: Theme;
@@ -117,7 +124,7 @@ export const SettingsModal: React.FC<{
 	onSetDeleteMode: (mode: "permanent" | "trash") => void;
 	onBackupDb: () => void;
 	onCleanExpiredTokens: () => void;
-	onClearDatabase: () => void;
+	onRequestClearDatabase: () => void;
 }> = ({
 	show,
 	theme,
@@ -129,10 +136,18 @@ export const SettingsModal: React.FC<{
 	onSetDeleteMode,
 	onBackupDb,
 	onCleanExpiredTokens,
-	onClearDatabase,
+	onRequestClearDatabase,
 }) => {
 	if (!show) return null;
 	const t = translations[lang];
+
+	const handleOpenExternal = async (url: string) => {
+		try {
+			await openUrl(url);
+		} catch {
+			window.open(url, "_blank");
+		}
+	};
 
 	const themeOptions: { id: Theme; label: string; colors: string[] }[] = [
 		{
@@ -180,12 +195,17 @@ export const SettingsModal: React.FC<{
 					className="flex items-center justify-between pb-3 border-b"
 					style={{ borderColor: "var(--border-app)" }}
 				>
-					<h3
-						className="font-semibold text-base"
-						style={{ color: "var(--text-app)" }}
-					>
-						{t.settingsTitle}
-					</h3>
+					<div className="flex items-center gap-2">
+						<h3
+							className="font-semibold text-base"
+							style={{ color: "var(--text-app)" }}
+						>
+							{t.settingsTitle}
+						</h3>
+						<span className="text-[10px] font-mono px-2 py-0.5 rounded-full border border-black/10 opacity-70 bg-black/10">
+							release 1.0.0
+						</span>
+					</div>
 					<button
 						onClick={onClose}
 						className="hover:opacity-70 cursor-pointer"
@@ -371,35 +391,293 @@ export const SettingsModal: React.FC<{
 						</div>
 					</button>
 
-					{/* Кнопка очистки базы данных */}
 					<button
-						onClick={onClearDatabase}
+						onClick={onRequestClearDatabase}
 						className="w-full flex items-center justify-between p-2.5 rounded-xl border text-xs font-medium text-rose-400 hover:bg-rose-500/10 border-rose-500/20 transition-all cursor-pointer"
 					>
 						<div className="flex items-center gap-2">
 							<Trash2 className="h-4 w-4" />
-							<span>
-								{lang === "ru"
-									? "Очистить базу данных (кроме токенов)"
-									: "Clear database (except tokens)"}
-							</span>
+							<span>{t.clearDbBtn}</span>
 						</div>
 					</button>
 				</div>
 
-				<div className="flex justify-end pt-1">
+				{/* Ссылки FAQ и Boosty с переводом */}
+				<div
+					className="pt-3 border-t space-y-2.5 pb-1"
+					style={{ borderColor: "var(--border-app)" }}
+				>
 					<button
-						onClick={onClose}
-						className="px-5 py-2 rounded-xl text-xs font-bold shadow-md transition-all active:scale-95 cursor-pointer"
+						type="button"
+						onClick={() =>
+							handleOpenExternal(
+								"https://github.com/ggghbc/VKPostingTool",
+							)
+						}
+						className="w-full flex items-center justify-center gap-2 p-2.5 rounded-xl border text-xs font-semibold hover:opacity-80 transition-all text-center cursor-pointer"
 						style={{
-							backgroundColor: "var(--btn-primary-bg)",
-							color: "var(--btn-primary-text)",
+							backgroundColor: "var(--bg-surface-sub)",
+							borderColor: "var(--border-light)",
+							color: "var(--text-app)",
 						}}
 					>
-						OK
+						<ExternalLink
+							className="h-4 w-4"
+							style={{ color: "var(--accent)" }}
+						/>
+						<span>{t.githubBtn}</span>
+					</button>
+
+					<button
+						type="button"
+						onClick={() =>
+							handleOpenExternal("https://boosty.to/ggghbc")
+						}
+						className="w-full flex items-center justify-center gap-2.5 p-3 rounded-xl text-xs font-bold text-white transition-all shadow-md active:scale-95 cursor-pointer border-0"
+						style={{ backgroundColor: "#f15f22" }}
+					>
+						<svg
+							className="h-4 w-4 fill-white flex-shrink-0"
+							viewBox="0 0 24 24"
+						>
+							<path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm3.87 8.16l-3.23 4.22h3.04L9.12 19.2l1.63-5.26H7.98l4.47-5.78h3.42z" />
+						</svg>
+						<span>{t.boostyBtn}</span>
 					</button>
 				</div>
 			</div>
+		</div>
+	);
+};
+
+export const ClearDatabaseConfirmModal: React.FC<{
+	show: boolean;
+	lang: Lang;
+	onClose: () => void;
+	onConfirm: () => void;
+}> = ({ show, lang, onClose, onConfirm }) => {
+	if (!show) return null;
+	const t = translations[lang];
+
+	return (
+		<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-[9999] animate-in fade-in duration-150">
+			<div
+				className="border rounded-2xl w-full max-w-sm p-5 shadow-2xl space-y-4"
+				style={{
+					backgroundColor: "var(--bg-surface)",
+					borderColor: "var(--border-app)",
+				}}
+			>
+				<div className="flex items-center gap-2 text-rose-400">
+					<AlertCircle className="h-5 w-5" />
+					<h3
+						className="font-semibold text-sm"
+						style={{ color: "var(--text-app)" }}
+					>
+						{t.clearDbConfirmTitle}
+					</h3>
+				</div>
+
+				<p
+					className="text-xs leading-relaxed"
+					style={{ color: "var(--text-muted)" }}
+				>
+					{t.clearDbConfirmText}
+				</p>
+
+				<div
+					className="flex justify-end gap-2 pt-2 border-t"
+					style={{ borderColor: "var(--border-app)" }}
+				>
+					<button
+						onClick={onClose}
+						className="px-4 py-2 rounded-xl text-xs font-medium hover:opacity-70 cursor-pointer"
+					>
+						{t.cancel}
+					</button>
+					<button
+						onClick={onConfirm}
+						className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold shadow-md transition-all active:scale-95 cursor-pointer"
+					>
+						{t.confirmDelete}
+					</button>
+				</div>
+			</div>
+		</div>
+	);
+};
+
+// Аутентичный рендер сетки ВКонтакте (VK Smart Grid)
+const VkSmartPhotoGrid: React.FC<{
+	files: FilePreview[];
+	viewMode: "grid" | "carousel";
+}> = ({ files, viewMode }) => {
+	if (files.length === 0) return null;
+
+	if (viewMode === "carousel") {
+		return (
+			<div className="flex overflow-x-auto gap-1.5 pb-1 rounded-xl">
+				{files.map((f, i) => (
+					<div
+						key={i}
+						className="h-44 w-56 flex-shrink-0 overflow-hidden rounded-lg bg-black/20"
+					>
+						{f.previewUrl ? (
+							<img
+								src={f.previewUrl}
+								alt=""
+								className="h-full w-full object-cover"
+							/>
+						) : (
+							<div
+								className="h-full w-full flex items-center justify-center border"
+								style={{ backgroundColor: "var(--bg-surface)" }}
+							>
+								<FileText
+									className="h-6 w-6"
+									style={{ color: "var(--accent)" }}
+								/>
+							</div>
+						)}
+					</div>
+				))}
+			</div>
+		);
+	}
+
+	const count = files.length;
+
+	const renderImg = (f?: FilePreview, extraClass = "") => {
+		if (!f) return null;
+		return (
+			<div
+				className={`relative overflow-hidden bg-black/10 ${extraClass}`}
+			>
+				{f.previewUrl ? (
+					<img
+						src={f.previewUrl}
+						alt=""
+						className="h-full w-full object-cover"
+					/>
+				) : (
+					<div
+						className="h-full w-full flex items-center justify-center border"
+						style={{ backgroundColor: "var(--bg-surface)" }}
+					>
+						<FileText
+							className="h-6 w-6"
+							style={{ color: "var(--accent)" }}
+						/>
+					</div>
+				)}
+			</div>
+		);
+	};
+
+	// 1 фото: крупно на всю ширину
+	if (count === 1) {
+		return (
+			<div className="rounded-xl overflow-hidden h-72">
+				{renderImg(files[0], "h-full w-full")}
+			</div>
+		);
+	}
+
+	// 2 фото: 2 равные колонки (Скриншот 4)
+	if (count === 2) {
+		return (
+			<div className="grid grid-cols-2 gap-1 rounded-xl overflow-hidden h-56">
+				{renderImg(files[0], "h-full w-full")}
+				{renderImg(files[1], "h-full w-full")}
+			</div>
+		);
+	}
+
+	// 3 фото: 1 крупное слева, 2 маленьких справа друг под другом (Скриншот 3)
+	if (count === 3) {
+		return (
+			<div className="grid grid-cols-3 gap-1 rounded-xl overflow-hidden h-64">
+				<div className="col-span-2 h-full">
+					{renderImg(files[0], "h-full w-full")}
+				</div>
+				<div className="grid grid-rows-2 gap-1 h-full">
+					{renderImg(files[1], "h-full w-full")}
+					{renderImg(files[2], "h-full w-full")}
+				</div>
+			</div>
+		);
+	}
+
+	// 4 фото: ровная сетка 2 на 2 квадрата (Скриншот 2)
+	if (count === 4) {
+		return (
+			<div className="grid grid-cols-2 grid-rows-2 gap-1 rounded-xl overflow-hidden h-64">
+				{renderImg(files[0], "h-full w-full")}
+				{renderImg(files[1], "h-full w-full")}
+				{renderImg(files[2], "h-full w-full")}
+				{renderImg(files[3], "h-full w-full")}
+			</div>
+		);
+	}
+
+	// 6 фото: 2 больших сверху, 4 маленьких снизу (Скриншот 6)
+	if (count === 6) {
+		return (
+			<div className="space-y-1 rounded-xl overflow-hidden">
+				<div className="grid grid-cols-2 gap-1 h-44">
+					{renderImg(files[0], "h-full w-full")}
+					{renderImg(files[1], "h-full w-full")}
+				</div>
+				<div className="grid grid-cols-4 gap-1 h-24">
+					{renderImg(files[2], "h-full w-full")}
+					{renderImg(files[3], "h-full w-full")}
+					{renderImg(files[4], "h-full w-full")}
+					{renderImg(files[5], "h-full w-full")}
+				</div>
+			</div>
+		);
+	}
+
+	// 7 фото: 2 больших сверху, 5 маленьких снизу (Скриншот 5)
+	if (count === 7) {
+		return (
+			<div className="space-y-1 rounded-xl overflow-hidden">
+				<div className="grid grid-cols-2 gap-1 h-44">
+					{renderImg(files[0], "h-full w-full")}
+					{renderImg(files[1], "h-full w-full")}
+				</div>
+				<div className="grid grid-cols-5 gap-1 h-20">
+					{files.slice(2, 7).map((f, i) => (
+						<div key={i} className="h-full w-full">
+							{renderImg(f, "h-full w-full")}
+						</div>
+					))}
+				</div>
+			</div>
+		);
+	}
+
+	// 9 фото: ровная сетка 3 на 3 (Скриншот 8)
+	if (count === 9) {
+		return (
+			<div className="grid grid-cols-3 grid-rows-3 gap-1 rounded-xl overflow-hidden h-72">
+				{files.map((f, i) => (
+					<div key={i} className="h-full w-full">
+						{renderImg(f, "h-full w-full")}
+					</div>
+				))}
+			</div>
+		);
+	}
+
+	// 5, 8 и 10 фото: общая аккуратная адаптивная сетка
+	return (
+		<div className="grid grid-cols-3 gap-1 rounded-xl overflow-hidden auto-rows-[90px]">
+			{files.map((f, i) => (
+				<div key={i} className="h-full w-full">
+					{renderImg(f, "h-full w-full")}
+				</div>
+			))}
 		</div>
 	);
 };
@@ -514,7 +792,7 @@ export const VkLivePreviewModal: React.FC<{
 
 						<div className="flex items-center gap-2">
 							<span
-								className="text-[10px] px-2 py-0.5 rounded-full border opacity-75"
+								className="text-[10px] px-2 py-0.5 rounded-full border opacity-75 cursor-default select-none"
 								style={{
 									backgroundColor: "var(--bg-surface)",
 									borderColor: "var(--border-light)",
@@ -525,7 +803,7 @@ export const VkLivePreviewModal: React.FC<{
 							</span>
 							<button
 								type="button"
-								className="p-1 opacity-60 hover:opacity-100 cursor-default"
+								className="p-1 opacity-60 cursor-default"
 								style={{ color: "var(--text-dim)" }}
 							>
 								<MoreHorizontal className="h-4 w-4" />
@@ -542,49 +820,11 @@ export const VkLivePreviewModal: React.FC<{
 						</p>
 					)}
 
-					{attachedFiles.length > 0 && (
-						<div
-							className={`gap-1 rounded-xl overflow-hidden ${
-								viewMode === "carousel"
-									? "flex overflow-x-auto pb-1"
-									: attachedFiles.length === 1
-										? "grid grid-cols-1"
-										: attachedFiles.length === 2
-											? "grid grid-cols-2"
-											: "grid grid-cols-2 sm:grid-cols-3"
-							}`}
-						>
-							{attachedFiles.map((f, i) => (
-								<div
-									key={i}
-									className={`relative overflow-hidden rounded-lg ${viewMode === "carousel" ? "h-40 w-52 flex-shrink-0" : "h-36"}`}
-								>
-									{f.previewUrl ? (
-										<img
-											src={f.previewUrl}
-											alt=""
-											className="h-full w-full object-cover"
-										/>
-									) : (
-										<div
-											className="h-full w-full flex items-center justify-center border"
-											style={{
-												backgroundColor:
-													"var(--bg-surface)",
-											}}
-										>
-											<FileText
-												className="h-6 w-6"
-												style={{
-													color: "var(--accent)",
-												}}
-											/>
-										</div>
-									)}
-								</div>
-							))}
-						</div>
-					)}
+					{/* Интеллектуальная сетка ВК */}
+					<VkSmartPhotoGrid
+						files={attachedFiles}
+						viewMode={viewMode}
+					/>
 
 					<div
 						className="flex items-center justify-between text-[11px] px-1 font-medium"
@@ -610,7 +850,7 @@ export const VkLivePreviewModal: React.FC<{
 					>
 						<div className="flex items-center gap-2">
 							<div
-								className="flex items-center gap-1 px-2.5 py-1 rounded-full border cursor-pointer hover:opacity-85 transition-opacity"
+								className="flex items-center gap-1 px-2.5 py-1 rounded-full border cursor-default"
 								style={{
 									backgroundColor: "var(--bg-surface)",
 									borderColor: "var(--border-light)",
@@ -624,7 +864,7 @@ export const VkLivePreviewModal: React.FC<{
 							</div>
 
 							<div
-								className="flex items-center gap-1 px-2.5 py-1 rounded-full border cursor-pointer hover:opacity-85 transition-opacity"
+								className="flex items-center gap-1 px-2.5 py-1 rounded-full border cursor-default"
 								style={{
 									backgroundColor: "var(--bg-surface)",
 									borderColor: "var(--border-light)",
@@ -638,7 +878,7 @@ export const VkLivePreviewModal: React.FC<{
 							</div>
 
 							<div
-								className="flex items-center gap-1 px-2.5 py-1 rounded-full border cursor-pointer hover:opacity-85 transition-opacity"
+								className="flex items-center gap-1 px-2.5 py-1 rounded-full border cursor-default"
 								style={{
 									backgroundColor: "var(--bg-surface)",
 									borderColor: "var(--border-light)",
@@ -653,7 +893,7 @@ export const VkLivePreviewModal: React.FC<{
 						</div>
 
 						<div
-							className="flex items-center gap-1 text-[11px]"
+							className="flex items-center gap-1 text-[11px] cursor-default"
 							style={{ color: "var(--text-dim)" }}
 						>
 							<Eye className="h-3.5 w-3.5" />
@@ -860,308 +1100,51 @@ export const CleanDiskModal: React.FC<{
 	);
 };
 
-// Меню "Все посты" с поддержкой дублированного выпадающего списка цели и кнопкой "Загрузить ещё"
-export const AllPostsModal: React.FC<{
+// Меню «Просмотр стены» (Wall Viewer)
+export const WallViewerModal: React.FC<{
 	show: boolean;
 	lang: Lang;
-	posts: PostItem[];
+	wallPosts: LiveWallPostItem[];
 	isSyncingWall: boolean;
 	targets: Target[];
 	selectedTargetId: number | null;
 	onSelectTarget: (id: number) => void;
 	onClose: () => void;
-	onDeletePost: (post: PostItem) => void;
 	onOpenFullImage: (url: string) => void;
-	onLoadVkPhotos: (post: PostItem) => void;
-	onSyncWallPosts: () => void;
-	onLoadMoreWallPosts: () => void;
+	onScanWall: () => void;
+	onLoadMore: () => void;
 }> = ({
 	show,
 	lang,
-	posts,
+	wallPosts,
 	isSyncingWall,
 	targets,
 	selectedTargetId,
 	onSelectTarget,
 	onClose,
-	onDeletePost,
 	onOpenFullImage,
-	onLoadVkPhotos,
-	onSyncWallPosts,
-	onLoadMoreWallPosts,
+	onScanWall,
+	onLoadMore,
 }) => {
 	if (!show) return null;
 	const t = translations[lang];
 
-	// Сортировка по умолчанию: "По дате (позже)"
-	const [sortCriteria, setSortCriteria] = useState<
-		"id_desc" | "id_asc" | "date_asc" | "date_desc" | "status"
-	>("date_desc");
-	const [groupByCriteria, setGroupByCriteria] = useState<
-		"none" | "target" | "status"
-	>("none");
-	const [filterTargetTitle, setFilterTargetTitle] = useState<string | null>(
-		null,
+	const [sortCriteria, setSortCriteria] = useState<"date_desc" | "date_asc">(
+		"date_desc",
 	);
 	const [expandedIds, setExpandedIds] = useState<number[]>([]);
 
-	const filteredPosts = filterTargetTitle
-		? posts.filter((p) => p.target_title === filterTargetTitle)
-		: posts;
-
-	const sortedPosts = [...filteredPosts].sort((a, b) => {
-		if (sortCriteria === "id_desc") return b.id - a.id;
-		if (sortCriteria === "id_asc") return a.id - b.id;
-		if (sortCriteria === "date_asc")
-			return (
-				new Date(a.scheduled_at_utc).getTime() -
-				new Date(b.scheduled_at_utc).getTime()
-			);
-		if (sortCriteria === "date_desc")
-			return (
-				new Date(b.scheduled_at_utc).getTime() -
-				new Date(a.scheduled_at_utc).getTime()
-			);
-		if (sortCriteria === "status") return a.status.localeCompare(b.status);
-		return 0;
-	});
+	const sortedPosts = useMemo(() => {
+		return [...wallPosts].sort((a, b) => {
+			const tA = new Date(a.date_utc).getTime();
+			const tB = new Date(b.date_utc).getTime();
+			return sortCriteria === "date_desc" ? tB - tA : tA - tB;
+		});
+	}, [wallPosts, sortCriteria]);
 
 	const toggleExpand = (id: number) => {
 		setExpandedIds((prev) =>
 			prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
-		);
-	};
-
-	const renderCard = (post: PostItem) => {
-		const isExpanded = expandedIds.includes(post.id);
-		const isVkPublished = post.status === "published";
-		const isDeletedInVk = post.status === "deleted_in_vk";
-
-		return (
-			<div
-				key={post.id}
-				className="rounded-xl border transition-colors overflow-hidden"
-				style={{
-					backgroundColor: "var(--bg-surface-sub)",
-					borderColor: "var(--border-light)",
-				}}
-			>
-				<div
-					onClick={() => toggleExpand(post.id)}
-					className="p-2.5 flex items-center justify-between gap-2 text-xs cursor-pointer select-none"
-				>
-					<div className="flex items-center gap-2 flex-1 min-w-0 overflow-hidden">
-						{/* Номер показывается только для созданных в приложении постов */}
-						{post.is_app_created !== false ? (
-							<span className="font-mono font-bold text-[11px] opacity-60 w-8 text-right flex-shrink-0">
-								#{post.id}
-							</span>
-						) : (
-							<span
-								className="text-[10px] px-1.5 py-0.2 rounded border font-semibold opacity-80 w-8 text-center flex-shrink-0"
-								style={{
-									backgroundColor: "var(--bg-surface)",
-									borderColor: "var(--border-light)",
-									color: "var(--accent)",
-								}}
-								title="Пост обнаружен на стене ВКонтакте"
-							>
-								ВК
-							</span>
-						)}
-
-						{/* Цель (фиксированная ширина для ровного выравнивания колонок) */}
-						<button
-							type="button"
-							onClick={(e) => {
-								e.stopPropagation();
-								setFilterTargetTitle(post.target_title || null);
-							}}
-							className="text-[10px] px-2 py-0.5 rounded-md font-semibold border truncate w-[130px] text-center flex-shrink-0 hover:opacity-80 transition-opacity cursor-pointer"
-							style={{
-								backgroundColor: "var(--bg-surface)",
-								borderColor: "var(--border-light)",
-								color: "var(--text-app)",
-							}}
-							title={post.target_title || "Без цели"}
-						>
-							{post.target_title || "Без цели"}
-						</button>
-
-						{/* Дата и время (фиксированная ширина) */}
-						<span
-							className="font-mono font-semibold w-[120px] text-center flex-shrink-0"
-							style={{ color: "var(--accent)" }}
-						>
-							{format(
-								new Date(post.scheduled_at_utc),
-								"dd/MM/yyyy HH:mm",
-							)}
-						</span>
-
-						{/* Статус публикации (фиксированная ширина) */}
-						<span
-							className="text-[10px] px-2 py-0.5 rounded border w-[115px] text-center flex-shrink-0 truncate"
-							style={{
-								backgroundColor: isVkPublished
-									? "var(--accent-glow)"
-									: "var(--bg-surface)",
-								borderColor: isVkPublished
-									? "var(--accent)"
-									: "var(--border-light)",
-								color: isVkPublished
-									? "var(--accent)"
-									: "var(--text-app)",
-							}}
-						>
-							{post.status === "queued"
-								? t.statusLocal
-								: post.status === "transferred_to_vk"
-									? t.statusVk
-									: isVkPublished
-										? t.statusPublished
-										: isDeletedInVk
-											? t.statusDeletedInVk
-											: t.statusError}
-						</span>
-
-						{/* Текст поста */}
-						<span
-							className="text-xs truncate flex-1 min-w-0 opacity-80 pl-2"
-							style={{ color: "var(--text-app)" }}
-						>
-							{post.text || (
-								<em className="opacity-50">
-									{lang === "ru" ? "Без текста" : "No text"}
-								</em>
-							)}
-						</span>
-					</div>
-
-					<div className="flex items-center gap-1 flex-shrink-0">
-						{/* Кнопка удаления скрыта для уже опубликованных постов */}
-						{!isVkPublished && (
-							<button
-								onClick={(e) => {
-									e.stopPropagation();
-									onDeletePost(post);
-								}}
-								className="p-1.5 hover:text-rose-400 transition-colors cursor-pointer"
-								style={{ color: "var(--text-dim)" }}
-								title="Delete"
-							>
-								<Trash2 className="h-4 w-4" />
-							</button>
-						)}
-
-						<div className="p-1 opacity-70">
-							{isExpanded ? (
-								<ChevronUp className="h-4 w-4" />
-							) : (
-								<ChevronDown className="h-4 w-4" />
-							)}
-						</div>
-					</div>
-				</div>
-
-				{/* Раскрывающийся подробный блок */}
-				{isExpanded && (
-					<div
-						className="px-4 pb-4 pt-2 border-t space-y-3"
-						style={{
-							borderColor: "var(--border-light)",
-							backgroundColor: "var(--bg-surface)",
-						}}
-					>
-						{post.text && (
-							<p
-								className="text-xs leading-relaxed"
-								style={{ color: "var(--text-app)" }}
-							>
-								{post.text}
-							</p>
-						)}
-
-						<div className="flex items-center gap-2 flex-wrap">
-							{post.vk_post_id && (
-								<button
-									type="button"
-									onClick={() => onLoadVkPhotos(post)}
-									className="px-3 py-1.5 rounded-lg border text-xs font-semibold flex items-center gap-1.5 hover:opacity-80 transition-all cursor-pointer"
-									style={{
-										backgroundColor:
-											"var(--bg-surface-sub)",
-										borderColor: "var(--border-light)",
-										color: "var(--accent)",
-									}}
-								>
-									<DownloadCloud className="h-3.5 w-3.5" />
-									<span>{t.loadVkPhotos}</span>
-								</button>
-							)}
-						</div>
-
-						{post.attachments && post.attachments.length > 0 ? (
-							<div>
-								<span
-									className="text-[11px] font-semibold block mb-1.5"
-									style={{ color: "var(--text-dim)" }}
-								>
-									{t.attachedFiles} ({post.attachments.length}
-									):
-								</span>
-								<div className="grid grid-cols-4 gap-2">
-									{post.attachments.map((att, attIdx) => (
-										<div
-											key={attIdx}
-											onClick={() =>
-												att.thumb_data &&
-												onOpenFullImage(att.thumb_data)
-											}
-											className="h-20 rounded-lg border flex flex-col items-center justify-center overflow-hidden p-1 relative hover:border-[var(--accent)] transition-colors cursor-pointer"
-											style={{
-												backgroundColor:
-													"var(--bg-surface-sub)",
-												borderColor:
-													"var(--border-light)",
-											}}
-										>
-											{att.thumb_data ? (
-												<img
-													src={att.thumb_data}
-													alt={att.file_name}
-													className="h-full w-full object-cover rounded"
-												/>
-											) : (
-												<div className="flex flex-col items-center p-1 text-center">
-													<FileText
-														className="h-5 w-5 mb-1"
-														style={{
-															color: "var(--accent)",
-														}}
-													/>
-													<span
-														className="text-[9px] truncate max-w-full"
-														style={{
-															color: "var(--text-muted)",
-														}}
-													>
-														{att.file_name}
-													</span>
-												</div>
-											)}
-										</div>
-									))}
-								</div>
-							</div>
-						) : (
-							<span className="text-[11px] italic opacity-50 block">
-								{t.noAttachments}
-							</span>
-						)}
-					</div>
-				)}
-			</div>
 		);
 	};
 
@@ -1187,14 +1170,13 @@ export const AllPostsModal: React.FC<{
 							className="font-semibold text-base"
 							style={{ color: "var(--text-app)" }}
 						>
-							{t.allPostsTab} ({posts.length})
+							{t.wallViewerTitle} ({wallPosts.length})
 						</h3>
 					</div>
 
 					<div className="flex items-center gap-2">
-						{/* Кнопка первого сканирования */}
 						<button
-							onClick={onSyncWallPosts}
+							onClick={onScanWall}
 							disabled={isSyncingWall}
 							className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-semibold hover:opacity-80 transition-all cursor-pointer disabled:opacity-50"
 							style={{
@@ -1207,34 +1189,27 @@ export const AllPostsModal: React.FC<{
 							<DownloadCloud
 								className={`h-3.5 w-3.5 ${isSyncingWall ? "animate-spin" : ""}`}
 							/>
-							<span>
-								{isSyncingWall
-									? "..."
-									: lang === "ru"
-										? "Сканировать стену ВК"
-										: "Sync Wall"}
-							</span>
+							<span>{isSyncingWall ? "..." : t.scanWallBtn}</span>
 						</button>
 
-						{/* Кнопка пагинации (Загрузить ещё) */}
-						<button
-							onClick={onLoadMoreWallPosts}
-							disabled={isSyncingWall}
-							className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-semibold hover:opacity-80 transition-all cursor-pointer disabled:opacity-50"
-							style={{
-								backgroundColor: "var(--bg-surface-sub)",
-								borderColor: "var(--border-light)",
-								color: "var(--text-app)",
-							}}
-							title="Загрузить следующую порцию старых постов"
-						>
-							<RefreshCw
-								className={`h-3.5 w-3.5 ${isSyncingWall ? "animate-spin" : ""}`}
-							/>
-							<span>
-								{lang === "ru" ? "Загрузить ещё" : "Load More"}
-							</span>
-						</button>
+						{wallPosts.length > 0 && (
+							<button
+								onClick={onLoadMore}
+								disabled={isSyncingWall}
+								className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-semibold hover:opacity-80 transition-all cursor-pointer disabled:opacity-50"
+								style={{
+									backgroundColor: "var(--bg-surface-sub)",
+									borderColor: "var(--border-light)",
+									color: "var(--text-app)",
+								}}
+								title="Загрузить следующие 30 постов"
+							>
+								<RefreshCw
+									className={`h-3.5 w-3.5 ${isSyncingWall ? "animate-spin" : ""}`}
+								/>
+								<span>{t.loadMoreBtn}</span>
+							</button>
+						)}
 
 						<button
 							onClick={onClose}
@@ -1246,7 +1221,6 @@ export const AllPostsModal: React.FC<{
 					</div>
 				</div>
 
-				{/* Панель фильтров на CustomSelect с дублированием выбора цели */}
 				<div
 					className="flex items-center justify-between gap-3 text-xs flex-wrap flex-shrink-0 p-2 rounded-xl border"
 					style={{
@@ -1255,7 +1229,6 @@ export const AllPostsModal: React.FC<{
 					}}
 				>
 					<div className="flex items-center gap-3 flex-wrap">
-						{/* Продублированный селектор цели */}
 						{targets.length > 1 && (
 							<div className="flex items-center gap-1.5">
 								<span style={{ color: "var(--text-dim)" }}>
@@ -1270,7 +1243,7 @@ export const AllPostsModal: React.FC<{
 									onChange={(val) =>
 										onSelectTarget(Number(val))
 									}
-									maxWidth="180px"
+									maxWidth="220px"
 								/>
 							</div>
 						)}
@@ -1287,53 +1260,12 @@ export const AllPostsModal: React.FC<{
 										label: t.sortDateDesc,
 									},
 									{ value: "date_asc", label: t.sortDateAsc },
-									{ value: "id_desc", label: t.sortIdDesc },
-									{ value: "id_asc", label: t.sortIdAsc },
-									{ value: "status", label: t.sortStatus },
 								]}
 								onChange={(val) => setSortCriteria(val)}
 								maxWidth="160px"
 							/>
 						</div>
-
-						<div className="flex items-center gap-1.5">
-							<span style={{ color: "var(--text-dim)" }}>
-								{t.groupBy}
-							</span>
-							<CustomSelect
-								value={groupByCriteria}
-								options={[
-									{ value: "none", label: t.groupNone },
-									{ value: "target", label: t.groupByTarget },
-									{ value: "status", label: t.groupByStatus },
-								]}
-								onChange={(val) => setGroupByCriteria(val)}
-								maxWidth="160px"
-							/>
-						</div>
 					</div>
-
-					{filterTargetTitle && (
-						<div
-							className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border font-semibold"
-							style={{
-								backgroundColor: "var(--bg-surface)",
-								borderColor: "var(--accent)",
-								color: "var(--accent)",
-							}}
-						>
-							<span>
-								{t.targetLabel} {filterTargetTitle}
-							</span>
-							<button
-								type="button"
-								onClick={() => setFilterTargetTitle(null)}
-								className="p-0.5 hover:opacity-75 cursor-pointer"
-							>
-								<X className="h-3 w-3" />
-							</button>
-						</div>
-					)}
 				</div>
 
 				<div className="flex-1 overflow-y-auto space-y-2.5 pr-1">
@@ -1341,48 +1273,176 @@ export const AllPostsModal: React.FC<{
 						<div className="text-center py-12 text-xs opacity-50">
 							{t.emptyAllPosts}
 						</div>
-					) : groupByCriteria === "none" ? (
-						sortedPosts.map(renderCard)
 					) : (
-						Object.entries(
-							sortedPosts.reduce(
-								(acc, p) => {
-									const groupKey =
-										groupByCriteria === "target"
-											? p.target_title || "Без цели"
-											: p.status === "queued"
-												? t.statusLocal
-												: p.status ===
-													  "transferred_to_vk"
-													? t.statusVk
-													: p.status === "published"
-														? t.statusPublished
-														: p.status ===
-															  "deleted_in_vk"
-															? t.statusDeletedInVk
-															: t.statusError;
-									if (!acc[groupKey]) acc[groupKey] = [];
-									acc[groupKey].push(p);
-									return acc;
-								},
-								{} as Record<string, PostItem[]>,
-							),
-						).map(([groupTitle, groupedPosts]) => (
-							<div key={groupTitle} className="space-y-1.5">
+						sortedPosts.map((post) => {
+							const isExpanded = expandedIds.includes(
+								post.vk_post_id,
+							);
+
+							return (
 								<div
-									className="text-xs font-bold px-2 py-1 rounded border sticky top-0"
+									key={post.vk_post_id}
+									className="rounded-xl border transition-colors overflow-hidden"
 									style={{
 										backgroundColor:
 											"var(--bg-surface-sub)",
 										borderColor: "var(--border-light)",
-										color: "var(--accent)",
 									}}
 								>
-									{groupTitle} ({groupedPosts.length})
+									<div
+										onClick={() =>
+											toggleExpand(post.vk_post_id)
+										}
+										className="p-2.5 flex items-center justify-between gap-2 text-xs cursor-pointer select-none"
+									>
+										<div className="flex items-center gap-2 flex-1 min-w-0 overflow-hidden">
+											{post.app_post_id ? (
+												<span className="font-mono font-bold text-[11px] opacity-60 w-8 text-right flex-shrink-0">
+													#{post.app_post_id}
+												</span>
+											) : (
+												<span
+													className="text-[10px] px-1.5 py-0.2 rounded border font-semibold opacity-80 w-16 text-center flex-shrink-0"
+													style={{
+														backgroundColor:
+															"var(--bg-surface)",
+														borderColor:
+															"var(--border-light)",
+														color: "var(--accent)",
+													}}
+												>
+													{t.wallPostBadge}
+												</span>
+											)}
+
+											<span
+												className="font-mono font-semibold w-[120px] text-center flex-shrink-0"
+												style={{
+													color: "var(--accent)",
+												}}
+											>
+												{format(
+													new Date(post.date_utc),
+													"dd/MM/yyyy HH:mm",
+												)}
+											</span>
+
+											<span
+												className="text-[10px] px-2 py-0.5 rounded border w-[115px] text-center flex-shrink-0 truncate"
+												style={{
+													backgroundColor:
+														"var(--accent-glow)",
+													borderColor:
+														"var(--accent)",
+													color: "var(--accent)",
+												}}
+											>
+												{t.statusPublished}
+											</span>
+
+											<span
+												className="text-xs truncate flex-1 min-w-0 opacity-80 pl-2"
+												style={{
+													color: "var(--text-app)",
+												}}
+											>
+												{post.text || (
+													<em className="opacity-50">
+														{lang === "ru"
+															? "Без текста"
+															: "No text"}
+													</em>
+												)}
+											</span>
+										</div>
+
+										<div className="flex items-center gap-1 flex-shrink-0">
+											<div className="p-1 opacity-70">
+												{isExpanded ? (
+													<ChevronUp className="h-4 w-4" />
+												) : (
+													<ChevronDown className="h-4 w-4" />
+												)}
+											</div>
+										</div>
+									</div>
+
+									{isExpanded && (
+										<div
+											className="px-4 pb-4 pt-2 border-t space-y-3"
+											style={{
+												borderColor:
+													"var(--border-light)",
+												backgroundColor:
+													"var(--bg-surface)",
+											}}
+										>
+											{post.text && (
+												<p
+													className="text-xs leading-relaxed"
+													style={{
+														color: "var(--text-app)",
+													}}
+												>
+													{post.text}
+												</p>
+											)}
+
+											{post.preview_urls.length > 0 ? (
+												<div>
+													<span
+														className="text-[11px] font-semibold block mb-1.5"
+														style={{
+															color: "var(--text-dim)",
+														}}
+													>
+														{t.attachedFiles} (
+														{
+															post.preview_urls
+																.length
+														}
+														):
+													</span>
+													<div className="grid grid-cols-4 gap-2">
+														{post.preview_urls.map(
+															(url, i) => (
+																<div
+																	key={i}
+																	onClick={() =>
+																		onOpenFullImage(
+																			url,
+																		)
+																	}
+																	className="h-20 rounded-lg border overflow-hidden p-0.5 cursor-pointer hover:border-[var(--accent)] transition-colors"
+																	style={{
+																		backgroundColor:
+																			"var(--bg-surface-sub)",
+																		borderColor:
+																			"var(--border-light)",
+																	}}
+																>
+																	<img
+																		src={
+																			url
+																		}
+																		alt=""
+																		className="h-full w-full object-cover rounded"
+																	/>
+																</div>
+															),
+														)}
+													</div>
+												</div>
+											) : (
+												<span className="text-[11px] italic opacity-50 block">
+													{t.noAttachments}
+												</span>
+											)}
+										</div>
+									)}
 								</div>
-								{groupedPosts.map(renderCard)}
-							</div>
-						))
+							);
+						})
 					)}
 				</div>
 			</div>
@@ -1825,7 +1885,7 @@ export const BatchModal: React.FC<{
 	);
 
 	const handlePickBatchFiles = async () => {
-		const res = await open({
+		const res = await openDialog({
 			multiple: true,
 			filters: [
 				{
@@ -1855,7 +1915,7 @@ export const BatchModal: React.FC<{
 	return (
 		<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-150">
 			<div
-				className="border rounded-2xl w-full max-w-lg p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto"
+				className="border rounded-2xl w-full max-w-lg p-6 shadow-2xl space-y-4"
 				style={{
 					backgroundColor: "var(--bg-surface)",
 					borderColor: "var(--border-app)",
@@ -2009,7 +2069,7 @@ export const BatchModal: React.FC<{
 					)}
 				</div>
 
-				{/* Списки цели и паттерна раскрываются вверх (dropUp) */}
+				{/* Раскрытие списков цели и паттерна вверх (dropUp) */}
 				<div
 					className="grid grid-cols-2 gap-3 pt-2 border-t"
 					style={{ borderColor: "var(--border-app)" }}

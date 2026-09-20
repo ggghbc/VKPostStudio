@@ -56,6 +56,15 @@ export interface PostItem {
 	attachments: AttachmentItem[];
 }
 
+export interface LiveWallPostItem {
+	vk_post_id: number;
+	date_utc: string;
+	text: string;
+	attachments_count: number;
+	app_post_id?: number | null;
+	preview_urls: string[];
+}
+
 export interface SyncResult {
 	posts: PostItem[];
 	group_auth_restricted: boolean;

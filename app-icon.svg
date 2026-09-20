@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1f1a2e"/>
+      <stop offset="100%" stop-color="#0e0b16"/>
+    </linearGradient>
+    <linearGradient id="primaryGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffafcc"/>
+      <stop offset="100%" stop-color="#bde0fe"/>
+    </linearGradient>
+  </defs>
+  <!-- Фоновый скругленный контейнер приложения -->
+  <rect width="512" height="512" rx="128" fill="url(#bg)"/>
+  <rect width="504" height="504" x="4" y="4" rx="124" fill="none" stroke="url(#primaryGrad)" stroke-width="8" stroke-opacity="0.3"/>
+  
+  <!-- Центральная пиктограмма слоев публикаций (Layers) -->
+  <g transform="translate(64, 64) scale(16)" stroke="url(#primaryGrad)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/>
+    <path d="m22 12.5-8.58 3.91a2 2 0 0 1-1.66 0L2 12.5"/>
+    <path d="m22 17.5-8.58 3.91a2 2 0 0 1-1.66 0L2 17.5"/>
+  </g>
+</svg>
