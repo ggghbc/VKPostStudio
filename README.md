@@ -20,9 +20,11 @@
 
 _High-performance desktop application designed for community administrators, and content creators._
 
-</div>
+<p align="center">
+  <img src="docs/images/mainInterface.png" alt="VK Post Studio Main Interface" width="100%" />
+</p>
 
----
+## </div>
 
 ## VK Post Studio features
 
@@ -111,7 +113,7 @@ Binaries and setup packages (`.exe`, `.msi`) will be generated inside `src-tauri
     - Click the **Live Preview (Eye)** icon to verify how the publication looks in the simulated VK newsfeed.
 6. **Publish to VK:**
     - Click **Send to VK** in the Queue panel. Sit back while the background worker uploads photos and queues them directly onto the VK.
-    - Click **Send to VK** again if there are a few posts with errors left.
+    - Click **Send to VK** again if there are a few posts with errors left. (could not process file (empty response error))
 7. **Clean Disk Space:**
     - Click **Clean Local Files** to safely recycle original disk files for already postponed posts, while preserving fast thumbnails and cloud URLs.
 
