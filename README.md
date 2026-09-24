@@ -27,11 +27,11 @@ _High-performance desktop application designed for community administrators, and
 
 ---
 
-### > [!WARNING]
+## !WARNING!
 
-> **VPN / Network Proxy Notice:**
-> Make sure to disable your VPN before using the application, or ensure you use the **exact same VPN/proxy** both in your browser when generating the access token and at the system level while running the app.
-> VK (VKontakte) security filters actively track IP address changes and may invalidate your access token or temporarily block API requests if the authorization IP does not match the publishing IP.
+**VPN / Network Proxy Notice:**
+- Make sure to disable your VPN before using the application, or ensure you use the **exact same VPN/proxy** both in your browser when generating the access token and at the system level while running the app.
+- VK (VKontakte) security filters actively track IP address changes and may invalidate your access token or temporarily block API requests if the authorization IP does not match the publishing IP.
 
 ---
 
