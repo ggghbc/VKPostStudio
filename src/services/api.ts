@@ -26,6 +26,7 @@ export const api = {
 		invoke("delete_account", { accountId }),
 	addToken: (rawToken: string) => invoke<Account>("add_token", { rawToken }),
 	cleanExpiredTokens: () => invoke<number>("clean_expired_tokens"),
+	refreshActiveToken: () => invoke<boolean>("refresh_active_token"),
 	getTargets: (accountId?: number | null) =>
 		invoke<Target[]>("get_targets", { accountId }),
 

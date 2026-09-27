@@ -1,10 +1,11 @@
+use crate::services::vk_auth::try_refresh_account_token;
 use crate::vk::client::VkClient;
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, Utc};
 use sqlx::{Row, SqlitePool};
 use std::path::PathBuf;
 use std::time::Duration;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 pub struct TransferWorker;
 
@@ -45,7 +46,7 @@ impl TransferWorker {
         target_id: i64,
     ) -> Result<()> {
         let target_row = sqlx::query(
-            "SELECT owner_id, target_type FROM targets WHERE id = ?"
+            "SELECT owner_id, target_type, account_id FROM targets WHERE id = ?"
         )
         .bind(target_id)
         .fetch_one(db)
@@ -53,7 +54,9 @@ impl TransferWorker {
 
         let owner_id: i64 = target_row.get("owner_id");
         let target_type: String = target_row.get("target_type");
+        let account_id: i64 = target_row.get("account_id");
         let from_group = target_type == "community" || owner_id < 0;
+        let mut vk = vk.clone();
 
         let posts = sqlx::query(
             "SELECT id, text, scheduled_at_utc, guid, signed, close_comments, mute_notifications, mark_as_ads, attachments_view_mode 
@@ -118,7 +121,11 @@ impl TransferWorker {
             let mut vk_attachment_strings = Vec::new();
             let mut upload_failed = false;
 
-            for att in attachments {
+            for (att_idx, att) in attachments.iter().enumerate() {
+                if att_idx > 0 {
+                    tokio::time::sleep(Duration::from_millis(400)).await;
+                }
+
                 let att_id: i64 = att.get("id");
                 let status: String = att.get("upload_status");
                 let existing_vk_str: Option<String> = att.get("vk_attachment_string");
@@ -142,8 +149,22 @@ impl TransferWorker {
                         break;
                     }
 
-                    match vk.upload_wall_photo(owner_id, &path).await {
-                        Ok(upload_res) => {
+                    let mut upload_res = vk.upload_wall_photo(owner_id, &path).await;
+
+                    // If error 5 (expired token), attempt auto-refresh and retry once
+                    if let Err(ref e) = upload_res {
+                        let err_str = e.to_string();
+                        if err_str.contains("error 5") || err_str.contains("User authorization failed") {
+                            let app_dir = app.path().app_data_dir().unwrap_or_default();
+                            if let Ok(new_token) = try_refresh_account_token(account_id, db, None, &app_dir).await {
+                                vk = VkClient::new(new_token);
+                                upload_res = vk.upload_wall_photo(owner_id, &path).await;
+                            }
+                        }
+                    }
+
+                    match upload_res {
+                        Ok(res) => {
                             let _ = sqlx::query(
                                 "UPDATE attachments SET 
                                     upload_status = 'uploaded', 
@@ -152,14 +173,14 @@ impl TransferWorker {
                                     full_url = ? 
                                  WHERE id = ?"
                             )
-                            .bind(&upload_res.vk_string)
-                            .bind(&upload_res.preview_url)
-                            .bind(&upload_res.full_url)
+                            .bind(&res.vk_string)
+                            .bind(&res.preview_url)
+                            .bind(&res.full_url)
                             .bind(att_id)
                             .execute(db)
                             .await;
 
-                            vk_attachment_strings.push(upload_res.vk_string);
+                            vk_attachment_strings.push(res.vk_string);
                         }
                         Err(e) => {
                             let formatted = format_vk_error(&e.to_string());
@@ -186,7 +207,7 @@ impl TransferWorker {
                 continue;
             }
 
-            let vk_result = vk
+            let mut vk_result = vk
                 .schedule_wall_post(
                     owner_id,
                     &text,
@@ -201,6 +222,32 @@ impl TransferWorker {
                     &guid,
                 )
                 .await;
+
+            // If error 5 (expired token), attempt auto-refresh and retry once
+            if let Err(ref e) = vk_result {
+                let err_str = e.to_string();
+                if err_str.contains("error 5") || err_str.contains("User authorization failed") {
+                    let app_dir = app.path().app_data_dir().unwrap_or_default();
+                    if let Ok(new_token) = try_refresh_account_token(account_id, db, None, &app_dir).await {
+                        vk = VkClient::new(new_token);
+                        vk_result = vk
+                            .schedule_wall_post(
+                                owner_id,
+                                &text,
+                                &vk_attachment_strings,
+                                effective_scheduled_at.timestamp(),
+                                from_group,
+                                signed,
+                                close_comments,
+                                mute_notifications,
+                                mark_as_ads,
+                                &attachments_view_mode,
+                                &guid,
+                            )
+                            .await;
+                    }
+                }
+            }
 
             match vk_result {
                 Ok(vk_post_id) => {

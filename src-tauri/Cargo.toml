@@ -1,7 +1,8 @@
 [package]
 name = "vk-post-studio"
 description = "VK Post Studio"
-version = "1.0.0"
+version = "1.0.1"
+authors = ["ggghbc"]
 edition = "2021"
 
 [lib]

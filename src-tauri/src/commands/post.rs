@@ -289,6 +289,7 @@ pub async fn get_post_history(
 pub async fn fetch_live_wall_posts(
     target_id: i64,
     offset: u32,
+    app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Vec<LiveWallPostDto>, String> {
     let target_row = sqlx::query("SELECT account_id, owner_id FROM targets WHERE id = ?")
@@ -307,14 +308,14 @@ pub async fn fetch_live_wall_posts(
         .map_err(|e| e.to_string())?;
 
     let db_token: String = token_row.get("token");
-    let token = TokenVault::get_token(account_id, &db_token);
+    let mut token = TokenVault::get_token(account_id, &db_token);
     let client = reqwest::Client::new();
     let url = format!(
         "https://api.vk.com/method/wall.get?access_token={}&v=5.131&owner_id={}&filter=owner&count=30&offset={}&photo_sizes=1",
         token, owner_id, offset
     );
 
-    let res_val: serde_json::Value = client
+    let mut res_val: serde_json::Value = client
         .get(&url)
         .send()
         .await
@@ -322,6 +323,32 @@ pub async fn fetch_live_wall_posts(
         .json()
         .await
         .map_err(|e| e.to_string())?;
+
+    if let Some(err_obj) = res_val.get("error") {
+        let code = err_obj.get("error_code").and_then(|v| v.as_i64()).unwrap_or(0);
+        if code == 5 {
+            let app_dir = app.path().app_data_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+            if let Ok(new_token) = crate::services::vk_auth::try_refresh_account_token(
+                account_id,
+                &state.db,
+                Some(&state.active_vk),
+                &app_dir,
+            ).await {
+                token = new_token;
+                let retry_url = format!(
+                    "https://api.vk.com/method/wall.get?access_token={}&v=5.131&owner_id={}&filter=owner&count=30&offset={}&photo_sizes=1",
+                    token, owner_id, offset
+                );
+                if let Ok(resp2) = client.get(&retry_url).send().await {
+                    if let Ok(val2) = resp2.json::<serde_json::Value>().await {
+                        if val2.get("error").is_none() {
+                            res_val = val2;
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     if let Some(err_obj) = res_val.get("error") {
         let code = err_obj.get("error_code").and_then(|v| v.as_i64()).unwrap_or(0);
@@ -418,6 +445,7 @@ pub async fn fetch_live_wall_posts(
 pub async fn fetch_vk_post_photos(
     target_id: i64,
     vk_post_id: i64,
+    app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Vec<DownloadedVkPhotoDto>, String> {
     let target_row = sqlx::query("SELECT account_id, owner_id FROM targets WHERE id = ?")
@@ -436,7 +464,7 @@ pub async fn fetch_vk_post_photos(
         .map_err(|e| e.to_string())?;
 
     let db_token: String = token_row.get("token");
-    let token = TokenVault::get_token(account_id, &db_token);
+    let mut token = TokenVault::get_token(account_id, &db_token);
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
         .build()
@@ -449,7 +477,7 @@ pub async fn fetch_vk_post_photos(
         token, post_query
     );
 
-    let res_val: serde_json::Value = client
+    let mut res_val: serde_json::Value = client
         .get(&request_url)
         .send()
         .await
@@ -457,6 +485,32 @@ pub async fn fetch_vk_post_photos(
         .json()
         .await
         .map_err(|e| e.to_string())?;
+
+    if let Some(err_obj) = res_val.get("error") {
+        let code = err_obj.get("error_code").and_then(|v| v.as_i64()).unwrap_or(0);
+        if code == 5 {
+            let app_dir = app.path().app_data_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+            if let Ok(new_token) = crate::services::vk_auth::try_refresh_account_token(
+                account_id,
+                &state.db,
+                Some(&state.active_vk),
+                &app_dir,
+            ).await {
+                token = new_token;
+                let retry_url = format!(
+                    "https://api.vk.com/method/wall.getById?access_token={}&v=5.131&posts={}",
+                    token, post_query
+                );
+                if let Ok(resp2) = client.get(&retry_url).send().await {
+                    if let Ok(val2) = resp2.json::<serde_json::Value>().await {
+                        if val2.get("error").is_none() {
+                            res_val = val2;
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     if let Some(err_obj) = res_val.get("error") {
         let code = err_obj.get("error_code").and_then(|v| v.as_i64()).unwrap_or(0);
@@ -552,11 +606,28 @@ pub async fn sync_vk_delayed_posts(
 
     let db_token: String = token_row.get("token");
     let token = TokenVault::get_token(account_id, &db_token);
-    let vk = VkClient::new(token);
+    let mut vk = VkClient::new(token);
 
     let mut group_auth_restricted = false;
 
-    match vk.get_postponed_posts(owner_id).await {
+    let mut vk_posts_res = vk.get_postponed_posts(owner_id).await;
+    if let Err(ref e) = vk_posts_res {
+        let err_str = e.to_string();
+        if err_str.contains("error 5") || err_str.contains("User authorization failed") {
+            let app_dir = app.path().app_data_dir().unwrap_or_else(|_| PathBuf::from("."));
+            if let Ok(new_token) = crate::services::vk_auth::try_refresh_account_token(
+                account_id,
+                &state.db,
+                Some(&state.active_vk),
+                &app_dir,
+            ).await {
+                vk = VkClient::new(new_token);
+                vk_posts_res = vk.get_postponed_posts(owner_id).await;
+            }
+        }
+    }
+
+    match vk_posts_res {
         Ok(vk_posts) => {
             let mut vk_post_ids = Vec::new();
 

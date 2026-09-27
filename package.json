@@ -1,7 +1,9 @@
 {
 	"name": "vk-post-studio",
+	"description": "VK Post Studio",
+	"version": "1.0.1",
+	"author": "ggghbc",
 	"private": true,
-	"version": "0.1.0",
 	"type": "module",
 	"scripts": {
 		"dev": "vite",

@@ -99,7 +99,7 @@ impl VkClient {
 
         let http = Client::builder()
             .default_headers(headers)
-            .timeout(Duration::from_secs(12))
+            .timeout(Duration::from_secs(45))
             .build()
             .unwrap();
 
@@ -122,19 +122,27 @@ impl VkClient {
             full_url.query_pairs_mut().append_pair(k.as_ref(), v.as_ref());
         }
 
-        let resp: VkApiEnvelope<T> = self
-            .http
-            .get(full_url)
-            .send()
-            .await?
-            .json()
-            .await?;
+        let mut attempts = 0;
+        loop {
+            attempts += 1;
+            let resp: VkApiEnvelope<T> = self
+                .http
+                .get(full_url.clone())
+                .send()
+                .await?
+                .json()
+                .await?;
 
-        if let Some(err) = resp.error {
-            return Err(anyhow!("VK API error {}: {}", err.error_code, err.error_msg));
+            if let Some(err) = resp.error {
+                if err.error_code == 6 && attempts <= 3 {
+                    tokio::time::sleep(Duration::from_millis(1000 * attempts as u64)).await;
+                    continue;
+                }
+                return Err(anyhow!("VK API error {}: {}", err.error_code, err.error_msg));
+            }
+
+            return resp.response.ok_or_else(|| anyhow!("VK API вернул пустой ответ"));
         }
-
-        resp.response.ok_or_else(|| anyhow!("VK API вернул пустой ответ"))
     }
 
     async fn post_vk<T: for<'de> Deserialize<'de>, I, K, V>(&self, method: &str, params: I) -> Result<T>
@@ -150,21 +158,29 @@ impl VkClient {
         }
         let body = form_url.query().unwrap_or("").to_string();
 
-        let resp: VkApiEnvelope<T> = self
-            .http
-            .post(&url)
-            .header("Content-Type", "application/x-www-form-urlencoded")
-            .body(body)
-            .send()
-            .await?
-            .json()
-            .await?;
+        let mut attempts = 0;
+        loop {
+            attempts += 1;
+            let resp: VkApiEnvelope<T> = self
+                .http
+                .post(&url)
+                .header("Content-Type", "application/x-www-form-urlencoded")
+                .body(body.clone())
+                .send()
+                .await?
+                .json()
+                .await?;
 
-        if let Some(err) = resp.error {
-            return Err(anyhow!("VK API error {}: {}", err.error_code, err.error_msg));
+            if let Some(err) = resp.error {
+                if err.error_code == 6 && attempts <= 3 {
+                    tokio::time::sleep(Duration::from_millis(1000 * attempts as u64)).await;
+                    continue;
+                }
+                return Err(anyhow!("VK API error {}: {}", err.error_code, err.error_msg));
+            }
+
+            return resp.response.ok_or_else(|| anyhow!("VK API вернул пустой ответ"));
         }
-
-        resp.response.ok_or_else(|| anyhow!("VK API вернул пустой ответ"))
     }
 
     pub async fn verify_token(&self) -> Result<TokenOwner> {
@@ -451,7 +467,9 @@ impl VkClient {
             .unwrap_or("jpg")
             .to_lowercase();
 
-        let (upload_bytes, mime_type, safe_ext) = if ext == "bmp" || ext == "tiff" || ext == "tif" {
+        // VK upload server strictly accepts JPG, PNG, GIF. Convert webp, bmp, tiff, tif to JPEG.
+        let needs_conversion = ext == "bmp" || ext == "tiff" || ext == "tif" || ext == "webp";
+        let (upload_bytes, mime_type, safe_ext) = if needs_conversion {
             let dyn_img = image::load_from_memory(&file_bytes)
                 .context("Не удалось декодировать изображение для конвертации")?;
             let mut buf = std::io::Cursor::new(Vec::new());
@@ -459,16 +477,14 @@ impl VkClient {
                 .context("Ошибка перекодирования в JPEG")?;
             (buf.into_inner(), "image/jpeg", "jpg")
         } else {
-            let m = match ext.as_str() {
-                "png" => "image/png",
-                "webp" => "image/webp",
-                "gif" => "image/gif",
-                _ => "image/jpeg",
+            let (m, s_ext) = match ext.as_str() {
+                "png" => ("image/png", "png"),
+                "gif" => ("image/gif", "gif"),
+                _ => ("image/jpeg", "jpg"),
             };
-            (file_bytes, m, ext.as_str())
+            (file_bytes, m, s_ext)
         };
 
-        let safe_name = format!("upload_{}.{}", rand::random::<u32>(), safe_ext);
         let is_group = target_owner_id < 0;
         let group_id_str = target_owner_id.abs().to_string();
 
@@ -480,148 +496,223 @@ impl VkClient {
             server_params.push(("group_id", group_id_str.clone()));
         }
 
-        let srv: UploadServerResponse = self
-            .post_vk("photos.getWallUploadServer", server_params)
-            .await
-            .context("Ошибка при получении адреса сервера загрузки фото")?;
+        const MAX_RETRIES: usize = 4;
+        let mut last_error: Option<anyhow::Error> = None;
 
-        let part = multipart::Part::bytes(upload_bytes)
-            .file_name(safe_name)
-            .mime_str(mime_type)?;
+        for attempt in 0..MAX_RETRIES {
+            if attempt > 0 {
+                let delay = Duration::from_millis(500 * (1 << (attempt - 1)));
+                tokio::time::sleep(delay).await;
+            }
 
-        let form = multipart::Form::new().part("photo", part);
-
-        let upload_raw: serde_json::Value = self
-            .http
-            .post(&srv.upload_url)
-            .multipart(form)
-            .send()
-            .await
-            .map_err(|e| anyhow!("Сбой передачи файла на сервер ВК: {}", e))?
-            .json()
-            .await
-            .context("VK upload server вернул некорректный ответ")?;
-
-        let server = upload_raw
-            .get("server")
-            .and_then(|v| {
-                if v.is_number() {
-                    Some(v.to_string())
-                } else {
-                    v.as_str().map(|s| s.to_string())
+            let srv: UploadServerResponse = match self
+                .post_vk("photos.getWallUploadServer", server_params.clone())
+                .await
+            {
+                Ok(s) => s,
+                Err(e) => {
+                    last_error = Some(e);
+                    continue;
                 }
-            })
-            .ok_or_else(|| anyhow!("Ответ загрузчика не содержит server: {:?}", upload_raw))?;
+            };
 
-        let photo = upload_raw
-            .get("photo")
-            .and_then(|v| {
-                if v.is_string() {
-                    v.as_str().map(|s| s.to_string())
-                } else {
-                    Some(v.to_string())
+            // Pacing delay before POSTing to upload server
+            tokio::time::sleep(Duration::from_millis(150)).await;
+
+            let safe_name = format!("upload_{}.{}", rand::random::<u32>(), safe_ext);
+            let part = match multipart::Part::bytes(upload_bytes.clone())
+                .file_name(safe_name)
+                .mime_str(mime_type)
+            {
+                Ok(p) => p,
+                Err(e) => return Err(anyhow!("Multipart part error: {}", e)),
+            };
+
+            let form = multipart::Form::new().part("photo", part);
+
+            let upload_resp = match self
+                .http
+                .post(&srv.upload_url)
+                .multipart(form)
+                .send()
+                .await
+            {
+                Ok(r) => r,
+                Err(e) => {
+                    last_error = Some(anyhow!("Сбой передачи файла на сервер ВК: {}", e));
+                    continue;
                 }
-            })
-            .ok_or_else(|| anyhow!("Ответ загрузчика не содержит photo: {:?}", upload_raw))?;
+            };
 
-        if photo == "[]" || photo == "\"[]\"" || photo.trim().is_empty() {
-            return Err(anyhow!("VK Upload Server не смог обработать файл (пустой ответ)"));
-        }
+            let upload_raw: serde_json::Value = match upload_resp.json().await {
+                Ok(v) => v,
+                Err(e) => {
+                    last_error = Some(anyhow!("VK upload server вернул некорректный ответ: {}", e));
+                    continue;
+                }
+            };
 
-        let hash = upload_raw
-            .get("hash")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| anyhow!("Ответ загрузчика не содержит hash: {:?}", upload_raw))?
-            .to_string();
-
-        let mut save_params = vec![
-            ("access_token", self.token.clone()),
-            ("v", self.v.to_string()),
-            ("server", server),
-            ("photo", photo),
-            ("hash", hash),
-        ];
-
-        if is_group {
-            save_params.push(("group_id", group_id_str));
-        } else if target_owner_id > 0 {
-            save_params.push(("user_id", target_owner_id.to_string()));
-        }
-
-        let saved_raw: serde_json::Value = self
-            .post_vk("photos.saveWallPhoto", save_params)
-            .await
-            .context("Ошибка при вызове photos.saveWallPhoto")?;
-
-        let photo_list = if let Some(arr) = saved_raw.as_array() {
-            arr
-        } else if let Some(arr) = saved_raw.get("response").and_then(|r| r.as_array()) {
-            arr
-        } else {
-            return Err(anyhow!("Неожиданная структура ответа photos.saveWallPhoto: {:?}", saved_raw));
-        };
-
-        let first = photo_list
-            .first()
-            .ok_or_else(|| anyhow!("VK вернул пустой список сохраненных фото: {:?}", saved_raw))?;
-
-        let pid = first
-            .get("id")
-            .and_then(|v| v.as_i64())
-            .ok_or_else(|| anyhow!("Нет id фото: {:?}", first))?;
-
-        let p_owner = first
-            .get("owner_id")
-            .and_then(|v| v.as_i64())
-            .ok_or_else(|| anyhow!("Нет owner_id фото: {:?}", first))?;
-
-        let mut full_url = None;
-        let mut preview_url = None;
-
-        if let Some(sizes) = first.get("sizes").and_then(|v| v.as_array()) {
-            full_url = sizes
-                .last()
-                .and_then(|s| s.get("url").or_else(|| s.get("src")))
-                .and_then(|u| u.as_str())
-                .map(|s| s.to_string());
-
-            preview_url = sizes
-                .iter()
-                .find(|s| {
-                    matches!(s.get("type").and_then(|v| v.as_str()), Some("x" | "y" | "z" | "m"))
+            let server = match upload_raw
+                .get("server")
+                .and_then(|v| {
+                    if v.is_number() {
+                        Some(v.to_string())
+                    } else {
+                        v.as_str().map(|s| s.to_string())
+                    }
                 })
-                .or_else(|| sizes.last())
-                .and_then(|s| s.get("url").or_else(|| s.get("src")))
-                .and_then(|u| u.as_str())
-                .map(|s| s.to_string());
-        }
+            {
+                Some(s) => s,
+                None => {
+                    last_error = Some(anyhow!("Ответ загрузчика не содержит server: {:?}", upload_raw));
+                    continue;
+                }
+            };
 
-        if full_url.is_none() {
-            for key in &["photo_2560", "photo_1280", "photo_807", "photo_604", "photo_130"] {
-                if let Some(u) = first.get(*key).and_then(|v| v.as_str()) {
-                    full_url = Some(u.to_string());
-                    break;
+            let photo = match upload_raw
+                .get("photo")
+                .and_then(|v| {
+                    if v.is_string() {
+                        v.as_str().map(|s| s.to_string())
+                    } else {
+                        Some(v.to_string())
+                    }
+                })
+            {
+                Some(p) => p,
+                None => {
+                    last_error = Some(anyhow!("Ответ загрузчика не содержит photo: {:?}", upload_raw));
+                    continue;
+                }
+            };
+
+            if photo == "[]" || photo == "\"[]\"" || photo.trim().is_empty() {
+                last_error = Some(anyhow!("VK Upload Server не смог обработать файл (пустой ответ)"));
+                continue;
+            }
+
+            let hash = match upload_raw
+                .get("hash")
+                .and_then(|v| v.as_str())
+            {
+                Some(h) => h.to_string(),
+                None => {
+                    last_error = Some(anyhow!("Ответ загрузчика не содержит hash: {:?}", upload_raw));
+                    continue;
+                }
+            };
+
+            // Pacing delay before photos.saveWallPhoto
+            tokio::time::sleep(Duration::from_millis(200)).await;
+
+            let mut save_params = vec![
+                ("access_token", self.token.clone()),
+                ("v", self.v.to_string()),
+                ("server", server),
+                ("photo", photo),
+                ("hash", hash),
+            ];
+
+            if is_group {
+                save_params.push(("group_id", group_id_str.clone()));
+            } else if target_owner_id > 0 {
+                save_params.push(("user_id", target_owner_id.to_string()));
+            }
+
+            let saved_raw: serde_json::Value = match self
+                .post_vk("photos.saveWallPhoto", save_params)
+                .await
+            {
+                Ok(v) => v,
+                Err(e) => {
+                    last_error = Some(e);
+                    continue;
+                }
+            };
+
+            let photo_list = if let Some(arr) = saved_raw.as_array() {
+                arr
+            } else if let Some(arr) = saved_raw.get("response").and_then(|r| r.as_array()) {
+                arr
+            } else {
+                last_error = Some(anyhow!("Неожиданная структура ответа photos.saveWallPhoto: {:?}", saved_raw));
+                continue;
+            };
+
+            let first = match photo_list.first() {
+                Some(f) => f,
+                None => {
+                    last_error = Some(anyhow!("VK вернул пустой список сохраненных фото: {:?}", saved_raw));
+                    continue;
+                }
+            };
+
+            let pid = match first.get("id").and_then(|v| v.as_i64()) {
+                Some(id) => id,
+                None => {
+                    last_error = Some(anyhow!("Нет id фото: {:?}", first));
+                    continue;
+                }
+            };
+
+            let p_owner = match first.get("owner_id").and_then(|v| v.as_i64()) {
+                Some(id) => id,
+                None => {
+                    last_error = Some(anyhow!("Нет owner_id фото: {:?}", first));
+                    continue;
+                }
+            };
+
+            let mut full_url = None;
+            let mut preview_url = None;
+
+            if let Some(sizes) = first.get("sizes").and_then(|v| v.as_array()) {
+                full_url = sizes
+                    .last()
+                    .and_then(|s| s.get("url").or_else(|| s.get("src")))
+                    .and_then(|u| u.as_str())
+                    .map(|s| s.to_string());
+
+                preview_url = sizes
+                    .iter()
+                    .find(|s| {
+                        matches!(s.get("type").and_then(|v| v.as_str()), Some("x" | "y" | "z" | "m"))
+                    })
+                    .or_else(|| sizes.last())
+                    .and_then(|s| s.get("url").or_else(|| s.get("src")))
+                    .and_then(|u| u.as_str())
+                    .map(|s| s.to_string());
+            }
+
+            if full_url.is_none() {
+                for key in &["photo_2560", "photo_1280", "photo_807", "photo_604", "photo_130"] {
+                    if let Some(u) = first.get(*key).and_then(|v| v.as_str()) {
+                        full_url = Some(u.to_string());
+                        break;
+                    }
                 }
             }
-        }
 
-        if preview_url.is_none() {
-            for key in &["photo_604", "photo_130", "photo_75"] {
-                if let Some(u) = first.get(*key).and_then(|v| v.as_str()) {
-                    preview_url = Some(u.to_string());
-                    break;
-                }
-            }
             if preview_url.is_none() {
-                preview_url = full_url.clone();
+                for key in &["photo_604", "photo_130", "photo_75"] {
+                    if let Some(u) = first.get(*key).and_then(|v| v.as_str()) {
+                        preview_url = Some(u.to_string());
+                        break;
+                    }
+                }
+                if preview_url.is_none() {
+                    preview_url = full_url.clone();
+                }
             }
+
+            return Ok(VkPhotoUploadResult {
+                vk_string: format!("photo{}_{}", p_owner, pid),
+                preview_url,
+                full_url,
+            });
         }
 
-        Ok(VkPhotoUploadResult {
-            vk_string: format!("photo{}_{}", p_owner, pid),
-            preview_url,
-            full_url,
-        })
+        Err(last_error.unwrap_or_else(|| anyhow!("VK Upload Server не смог обработать файл (пустой ответ)")))
     }
 
     pub async fn schedule_wall_post(

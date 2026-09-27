@@ -412,12 +412,33 @@ export function formatNormalizedError(
 
 	const isRu = lang === "ru";
 
-	if (clean.includes("error 5") || clean.includes("User authorization failed")) {
+	if (
+		clean.includes("VK Upload Server") ||
+		clean.includes("не смог обработать файл") ||
+		clean.includes("пустой ответ") ||
+		clean.includes("upload server") ||
+		clean.includes("failed to process the file") ||
+		clean.includes("empty response") ||
+		clean.includes("Ответ загрузчика")
+	) {
+		return isRu
+			? "VK Upload Server не смог обработать файл (пустой ответ от сервера загрузки)."
+			: "VK Upload Server failed to process the file (empty response from upload server).";
+	}
+	if (
+		clean.includes("error 5") ||
+		clean.includes("User authorization failed") ||
+		clean.includes("Требуется обновление токена") ||
+		clean.includes("Требуется повторный вход")
+	) {
 		return isRu
 			? "Требуется повторный вход: токен устарел или изменился IP/VPN (код ошибки 5)."
 			: "Authorization required: token expired or IP/VPN changed (error code 5).";
 	}
-	if (clean.includes("error 27")) {
+	if (
+		clean.includes("error 27") ||
+		clean.includes("пользователя-администратора")
+	) {
 		return isRu
 			? "Недостаточно прав: для публикации от имени группы требуется токен пользователя-администратора (код ошибки 27)."
 			: "Insufficient permissions: admin user token required (error code 27).";
@@ -450,7 +471,9 @@ export function formatNormalizedError(
 	if (
 		clean.includes("error sending request") ||
 		clean.includes("connection closed") ||
-		clean.includes("timed out")
+		clean.includes("timed out") ||
+		clean.includes("Сбой передачи файла") ||
+		clean.includes("Сбой соединения")
 	) {
 		return isRu
 			? "Сбой соединения с серверами ВКонтакте (ошибка сети/таймаут). Проверьте интернет-подключение."

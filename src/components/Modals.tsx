@@ -186,14 +186,14 @@ export const SettingsModal: React.FC<{
 	return (
 		<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-150">
 			<div
-				className="border rounded-2xl w-full max-w-md p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto"
+				className="border rounded-2xl w-full max-w-md p-5 shadow-2xl space-y-3"
 				style={{
 					backgroundColor: "var(--bg-surface)",
 					borderColor: "var(--border-app)",
 				}}
 			>
 				<div
-					className="flex items-center justify-between pb-3 border-b"
+					className="flex items-center justify-between pb-2.5 border-b"
 					style={{ borderColor: "var(--border-app)" }}
 				>
 					<div className="flex items-center gap-2">
@@ -204,7 +204,7 @@ export const SettingsModal: React.FC<{
 							{t.settingsTitle}
 						</h3>
 						<span className="text-[10px] font-mono px-2 py-0.5 rounded-full border border-black/10 opacity-70 bg-black/10">
-							release 1.0.0
+							release 1.0.1
 						</span>
 					</div>
 					<button
@@ -217,23 +217,23 @@ export const SettingsModal: React.FC<{
 				</div>
 
 				{/* Тема оформления */}
-				<div className="space-y-2">
+				<div className="space-y-1.5">
 					<label
 						className="flex items-center gap-2 text-xs font-semibold"
 						style={{ color: "var(--text-app)" }}
 					>
 						<Palette
-							className="h-4 w-4"
+							className="h-3.5 w-3.5"
 							style={{ color: "var(--accent)" }}
 						/>
 						<span>{t.themeTitle}</span>
 					</label>
-					<div className="flex flex-col gap-2 max-h-48 overflow-y-auto pr-1">
+					<div className="grid grid-cols-2 gap-1.5">
 						{themeOptions.map((th) => (
 							<button
 								key={th.id}
 								onClick={() => onSetTheme(th.id)}
-								className="flex items-center justify-between py-2 px-3 rounded-xl border text-xs font-semibold transition-all cursor-pointer"
+								className="flex items-center justify-between py-1.5 px-2.5 rounded-xl border text-[11px] font-semibold transition-all cursor-pointer truncate"
 								style={{
 									backgroundColor:
 										theme === th.id
@@ -249,12 +249,12 @@ export const SettingsModal: React.FC<{
 											: "var(--text-app)",
 								}}
 							>
-								<span>{th.label}</span>
-								<div className="flex items-center gap-1">
+								<span className="truncate mr-1">{th.label}</span>
+								<div className="flex items-center gap-0.5 flex-shrink-0">
 									{th.colors.map((c, i) => (
 										<span
 											key={i}
-											className="h-3.5 w-3.5 rounded-full border border-black/20"
+											className="h-2.5 w-2.5 rounded-full border border-black/20"
 											style={{ backgroundColor: c }}
 										/>
 									))}
@@ -265,18 +265,18 @@ export const SettingsModal: React.FC<{
 				</div>
 
 				{/* Язык интерфейса */}
-				<div className="space-y-2">
+				<div className="space-y-1.5">
 					<label
 						className="flex items-center gap-2 text-xs font-semibold"
 						style={{ color: "var(--text-app)" }}
 					>
 						<Globe
-							className="h-4 w-4"
+							className="h-3.5 w-3.5"
 							style={{ color: "var(--accent)" }}
 						/>
 						<span>{t.langTitle}</span>
 					</label>
-					<div className="grid grid-cols-2 gap-2">
+					<div className="grid grid-cols-2 gap-1.5">
 						{[
 							{ id: "ru" as Lang, label: "Русский" },
 							{ id: "en" as Lang, label: "English" },
@@ -284,7 +284,7 @@ export const SettingsModal: React.FC<{
 							<button
 								key={lg.id}
 								onClick={() => onSetLang(lg.id)}
-								className={`py-2 px-3 rounded-xl border text-xs font-semibold transition-all cursor-pointer ${
+								className={`py-1.5 px-3 rounded-xl border text-xs font-semibold transition-all cursor-pointer ${
 									lang === lg.id
 										? "border-transparent"
 										: "hover:opacity-80"
@@ -311,18 +311,18 @@ export const SettingsModal: React.FC<{
 				</div>
 
 				{/* Режим удаления файлов */}
-				<div className="space-y-2">
+				<div className="space-y-1.5">
 					<label
 						className="flex items-center gap-2 text-xs font-semibold"
 						style={{ color: "var(--text-app)" }}
 					>
 						<Trash2
-							className="h-4 w-4"
+							className="h-3.5 w-3.5"
 							style={{ color: "var(--accent)" }}
 						/>
 						<span>{t.deleteModeTitle}</span>
 					</label>
-					<div className="grid grid-cols-2 gap-2">
+					<div className="grid grid-cols-2 gap-1.5">
 						{[
 							{ id: "trash" as const, label: t.deleteModeTrash },
 							{
@@ -333,7 +333,7 @@ export const SettingsModal: React.FC<{
 							<button
 								key={mode.id}
 								onClick={() => onSetDeleteMode(mode.id)}
-								className={`py-2 px-3 rounded-xl border text-xs font-semibold transition-all cursor-pointer ${
+								className={`py-1.5 px-3 rounded-xl border text-xs font-semibold transition-all cursor-pointer ${
 									deleteMode === mode.id
 										? "border-transparent"
 										: "hover:opacity-80"
@@ -361,12 +361,12 @@ export const SettingsModal: React.FC<{
 
 				{/* Сервисные действия */}
 				<div
-					className="pt-2 border-t space-y-2"
+					className="pt-2 border-t space-y-1.5"
 					style={{ borderColor: "var(--border-app)" }}
 				>
 					<button
 						onClick={onBackupDb}
-						className="w-full flex items-center justify-between p-2.5 rounded-xl border text-xs font-medium hover:opacity-80 transition-all cursor-pointer"
+						className="w-full flex items-center justify-between p-2 rounded-xl border text-xs font-medium hover:opacity-80 transition-all cursor-pointer"
 						style={{
 							backgroundColor: "var(--bg-surface-sub)",
 							borderColor: "var(--border-light)",
@@ -375,7 +375,7 @@ export const SettingsModal: React.FC<{
 					>
 						<div className="flex items-center gap-2">
 							<HardDrive
-								className="h-4 w-4"
+								className="h-3.5 w-3.5"
 								style={{ color: "var(--accent)" }}
 							/>
 							<span>{t.backupDb}</span>
@@ -384,28 +384,28 @@ export const SettingsModal: React.FC<{
 
 					<button
 						onClick={onCleanExpiredTokens}
-						className="w-full flex items-center justify-between p-2.5 rounded-xl border text-xs font-medium text-rose-400 hover:bg-rose-500/10 border-rose-500/20 transition-all cursor-pointer"
+						className="w-full flex items-center justify-between p-2 rounded-xl border text-xs font-medium text-rose-400 hover:bg-rose-500/10 border-rose-500/20 transition-all cursor-pointer"
 					>
 						<div className="flex items-center gap-2">
-							<ShieldAlert className="h-4 w-4" />
+							<ShieldAlert className="h-3.5 w-3.5" />
 							<span>{t.cleanExpiredTokens}</span>
 						</div>
 					</button>
 
 					<button
 						onClick={onRequestClearDatabase}
-						className="w-full flex items-center justify-between p-2.5 rounded-xl border text-xs font-medium text-rose-400 hover:bg-rose-500/10 border-rose-500/20 transition-all cursor-pointer"
+						className="w-full flex items-center justify-between p-2 rounded-xl border text-xs font-medium text-rose-400 hover:bg-rose-500/10 border-rose-500/20 transition-all cursor-pointer"
 					>
 						<div className="flex items-center gap-2">
-							<Trash2 className="h-4 w-4" />
+							<Trash2 className="h-3.5 w-3.5" />
 							<span>{t.clearDbBtn}</span>
 						</div>
 					</button>
 				</div>
 
-				{/* Ссылки FAQ и Boosty с переводом */}
+				{/* Ссылки FAQ и Boosty с переводом в 2 колонки */}
 				<div
-					className="pt-3 border-t space-y-2.5 pb-1"
+					className="pt-2.5 border-t grid grid-cols-2 gap-2"
 					style={{ borderColor: "var(--border-app)" }}
 				>
 					<button
@@ -415,7 +415,7 @@ export const SettingsModal: React.FC<{
 								"https://github.com/ggghbc/VKPostingTool",
 							)
 						}
-						className="w-full flex items-center justify-center gap-2 p-2.5 rounded-xl border text-xs font-semibold hover:opacity-80 transition-all text-center cursor-pointer"
+						className="flex items-center justify-center gap-1.5 p-2 rounded-xl border text-xs font-semibold hover:opacity-80 transition-all text-center cursor-pointer"
 						style={{
 							backgroundColor: "var(--bg-surface-sub)",
 							borderColor: "var(--border-light)",
@@ -423,7 +423,7 @@ export const SettingsModal: React.FC<{
 						}}
 					>
 						<ExternalLink
-							className="h-4 w-4"
+							className="h-3.5 w-3.5"
 							style={{ color: "var(--accent)" }}
 						/>
 						<span>{t.githubBtn}</span>
@@ -434,11 +434,11 @@ export const SettingsModal: React.FC<{
 						onClick={() =>
 							handleOpenExternal("https://boosty.to/ggghbc")
 						}
-						className="w-full flex items-center justify-center gap-2.5 p-3 rounded-xl text-xs font-bold text-white transition-all shadow-md active:scale-95 cursor-pointer border-0"
+						className="flex items-center justify-center gap-2 p-2 rounded-xl text-xs font-bold text-white transition-all shadow-md active:scale-95 cursor-pointer border-0"
 						style={{ backgroundColor: "#f15f22" }}
 					>
 						<svg
-							className="h-4 w-4 fill-white flex-shrink-0"
+							className="h-3.5 w-3.5 fill-white flex-shrink-0"
 							viewBox="0 0 24 24"
 						>
 							<path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm3.87 8.16l-3.23 4.22h3.04L9.12 19.2l1.63-5.26H7.98l4.47-5.78h3.42z" />
@@ -671,7 +671,64 @@ const VkSmartPhotoGrid: React.FC<{
 		);
 	}
 
-	// 5, 8 и 10 фото: общая аккуратная адаптивная сетка
+	// 5 фото: 2 больших сверху, 3 маленьких снизу
+	if (count === 5) {
+		return (
+			<div className="space-y-1 rounded-xl overflow-hidden">
+				<div className="grid grid-cols-2 gap-1 h-44">
+					{renderImg(files[0], "h-full w-full")}
+					{renderImg(files[1], "h-full w-full")}
+				</div>
+				<div className="grid grid-cols-3 gap-1 h-24">
+					{files.slice(2, 5).map((f, i) => (
+						<div key={i} className="h-full w-full">
+							{renderImg(f, "h-full w-full")}
+						</div>
+					))}
+				</div>
+			</div>
+		);
+	}
+
+	// 8 фото: 2 больших сверху, 6 маленьких снизу
+	if (count === 8) {
+		return (
+			<div className="space-y-1 rounded-xl overflow-hidden">
+				<div className="grid grid-cols-2 gap-1 h-48">
+					{renderImg(files[0], "h-full w-full")}
+					{renderImg(files[1], "h-full w-full")}
+				</div>
+				<div className="grid grid-cols-6 gap-1 h-16">
+					{files.slice(2, 8).map((f, i) => (
+						<div key={i} className="h-full w-full">
+							{renderImg(f, "h-full w-full")}
+						</div>
+					))}
+				</div>
+			</div>
+		);
+	}
+
+	// 10 фото: 2 больших сверху, 8 маленьких в ряд снизу (точно как в ленте ВК)
+	if (count >= 10) {
+		return (
+			<div className="space-y-1 rounded-xl overflow-hidden">
+				<div className="grid grid-cols-2 gap-1 h-56">
+					{renderImg(files[0], "h-full w-full")}
+					{renderImg(files[1], "h-full w-full")}
+				</div>
+				<div className="grid grid-cols-8 gap-1 h-14">
+					{files.slice(2, 10).map((f, i) => (
+						<div key={i} className="h-full w-full">
+							{renderImg(f, "h-full w-full")}
+						</div>
+					))}
+				</div>
+			</div>
+		);
+	}
+
+	// Любое другое количество: общая аккуратная адаптивная сетка
 	return (
 		<div className="grid grid-cols-3 gap-1 rounded-xl overflow-hidden auto-rows-[90px]">
 			{files.map((f, i) => (
@@ -711,15 +768,19 @@ export const VkLivePreviewModal: React.FC<{
 	if (!show) return null;
 	const t = translations[lang];
 
-	const stats = useMemo(
-		() => ({
+	const stats = useMemo(() => {
+		const rawViews = Math.floor(Math.random() * 3200) + 300;
+		const views =
+			rawViews >= 1000
+				? `${(rawViews / 1000).toFixed(1)}K`
+				: `${rawViews}`;
+		return {
 			likes: Math.floor(Math.random() * 45) + 3,
 			comments: commentsOnPost ? Math.floor(Math.random() * 6) : 0,
 			shares: Math.floor(Math.random() * 8),
-			views: `${(Math.random() * 1.5 + 0.5).toFixed(1)}K`,
-		}),
-		[show, commentsOnPost],
-	);
+			views,
+		};
+	}, [show, commentsOnPost]);
 
 	return (
 		<div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-150">

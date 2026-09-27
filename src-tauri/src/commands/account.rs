@@ -3,7 +3,7 @@ use crate::vk::client::{TokenOwner, VkClient};
 use crate::AppState;
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 
 #[derive(Serialize, Deserialize)]
 pub struct AccountDto {
@@ -89,13 +89,25 @@ pub async fn delete_account(account_id: i64, app: AppHandle, state: State<'_, Ap
     tx.commit().await.map_err(|e| e.to_string())?;
 
     TokenVault::delete_token(account_id);
+    TokenVault::delete_secret(account_id);
     Ok(())
 }
 
 #[tauri::command]
-pub async fn add_token(raw_token: String, state: State<'_, AppState>) -> Result<AccountDto, String> {
-    let token = if raw_token.contains("access_token=") {
-        raw_token.split("access_token=").nth(1).unwrap_or("").split('&').next().unwrap_or("").to_string()
+pub async fn add_token(
+    raw_token: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<AccountDto, String> {
+    let mut token = if raw_token.contains("access_token=") {
+        raw_token
+            .split("access_token=")
+            .nth(1)
+            .unwrap_or("")
+            .split('&')
+            .next()
+            .unwrap_or("")
+            .to_string()
     } else {
         raw_token.trim().to_string()
     };
@@ -104,8 +116,34 @@ pub async fn add_token(raw_token: String, state: State<'_, AppState>) -> Result<
         return Err("Токен не может быть пустым".to_string());
     }
 
-    let vk = VkClient::new(token.clone());
-    let owner = vk.verify_token().await.map_err(|e| e.to_string())?;
+    let http = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(20))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let mut direct_secret: Option<String> = None;
+
+    // Verify token or check if input is an exchange secret
+    let owner_result = VkClient::new(token.clone()).verify_token().await;
+    let owner = match owner_result {
+        Ok(o) => o,
+        Err(e) => {
+            // Check if user entered an exchange token / secret directly
+            match crate::services::vk_auth::refresh_token(&http, &token).await {
+                Ok(new_tok) => {
+                    direct_secret = Some(token.clone());
+                    token = new_tok.clone();
+                    VkClient::new(token.clone())
+                        .verify_token()
+                        .await
+                        .map_err(|e2| {
+                            format!("Ошибка верификации после обновления токена: {}", e2)
+                        })?
+                }
+                Err(_) => return Err(e.to_string()),
+            }
+        }
+    };
 
     let (owner_id, owner_name, target_type) = match owner {
         TokenOwner::User { id, name } => (id, name, "user"),
@@ -138,6 +176,30 @@ pub async fn add_token(raw_token: String, state: State<'_, AppState>) -> Result<
     };
 
     let _ = TokenVault::store_token(account_id, &token);
+
+    // Save secret if provided or exchange token for common_token via auth.getExchangeToken
+    let app_dir = app.path().app_data_dir().unwrap_or_default();
+    let device_mgr = crate::vk::device::VkDeviceManager::load_or_generate(&app_dir);
+
+    let secret_to_save = if let Some(sec) = direct_secret {
+        Some(sec)
+    } else {
+        crate::services::vk_auth::exchange_token_for_secret(
+            &http,
+            &token,
+            device_mgr.get_device_id(),
+        )
+        .await
+        .ok()
+    };
+
+    if let Some(sec) = secret_to_save {
+        let _ = TokenVault::store_secret(account_id, &sec);
+        let _ = sqlx::query("UPDATE accounts SET secret = 'keyring_protected' WHERE id = ?")
+            .bind(account_id)
+            .execute(&state.db)
+            .await;
+    }
 
     // Безопасное добавление/обновление основной цели без сбоев ON CONFLICT
     let target_title = if target_type == "user" {
@@ -174,6 +236,9 @@ pub async fn add_token(raw_token: String, state: State<'_, AppState>) -> Result<
     }
 
     // Безопасное добавление администрируемых групп
+    let vk = VkClient::new(token.clone());
+    *state.active_vk.lock().await = Some(vk.clone());
+
     if target_type == "user" {
         if let Ok(groups) = vk.get_admin_groups().await {
             for (gid, gname, _) in groups {
@@ -213,13 +278,46 @@ pub async fn add_token(raw_token: String, state: State<'_, AppState>) -> Result<
 }
 
 #[tauri::command]
-pub async fn clean_expired_tokens(state: State<'_, AppState>) -> Result<usize, String> {
+pub async fn refresh_active_token(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<bool, String> {
+    let active_row = sqlx::query("SELECT id FROM accounts WHERE is_active = 1 LIMIT 1")
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if let Some(r) = active_row {
+        let acc_id: i64 = r.get("id");
+        let app_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+        match crate::services::vk_auth::try_refresh_account_token(
+            acc_id,
+            &state.db,
+            Some(&state.active_vk),
+            &app_dir,
+        )
+        .await
+        {
+            Ok(_) => Ok(true),
+            Err(e) => Err(e.to_string()),
+        }
+    } else {
+        Err("Нет активного аккаунта".to_string())
+    }
+}
+
+#[tauri::command]
+pub async fn clean_expired_tokens(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<usize, String> {
     let accounts = sqlx::query("SELECT id, token FROM accounts")
         .fetch_all(&state.db)
         .await
         .map_err(|e| e.to_string())?;
 
     let mut deleted_count = 0;
+    let app_dir = app.path().app_data_dir().unwrap_or_default();
 
     for r in accounts {
         let acc_id: i64 = r.get("id");
@@ -236,11 +334,33 @@ pub async fn clean_expired_tokens(state: State<'_, AppState>) -> Result<usize, S
                     || err_str.contains("access_token was given to another ip");
 
                 if is_revoked {
+                    // Try auto-refreshing via secret before deleting account
+                    if let Ok(new_token) = crate::services::vk_auth::try_refresh_account_token(
+                        acc_id,
+                        &state.db,
+                        Some(&state.active_vk),
+                        &app_dir,
+                    )
+                    .await
+                    {
+                        let fresh_vk = VkClient::new(new_token);
+                        if fresh_vk.verify_token().await.is_ok() {
+                            continue; // Successfully refreshed, preserve account!
+                        }
+                    }
+
                     let mut tx = state.db.begin().await.map_err(|e| e.to_string())?;
-                    let _ = sqlx::query("DELETE FROM targets WHERE account_id = ?").bind(acc_id).execute(&mut *tx).await;
-                    let _ = sqlx::query("DELETE FROM accounts WHERE id = ?").bind(acc_id).execute(&mut *tx).await;
+                    let _ = sqlx::query("DELETE FROM targets WHERE account_id = ?")
+                        .bind(acc_id)
+                        .execute(&mut *tx)
+                        .await;
+                    let _ = sqlx::query("DELETE FROM accounts WHERE id = ?")
+                        .bind(acc_id)
+                        .execute(&mut *tx)
+                        .await;
                     let _ = tx.commit().await;
                     TokenVault::delete_token(acc_id);
+                    TokenVault::delete_secret(acc_id);
                     deleted_count += 1;
                 }
             }

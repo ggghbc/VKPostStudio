@@ -6,6 +6,7 @@
 
 <br/>
 
+![Release](https://img.shields.io/badge/Release-v1.0.1-blue?style=for-the-badge)
 ![Tauri](https://img.shields.io/badge/Tauri-2.x-24C8D8?style=for-the-badge&logo=tauri&logoColor=white)
 ![Rust](https://img.shields.io/badge/Rust-2021_Edition-DEA584?style=for-the-badge&logo=rust&logoColor=white)
 ![React](https://img.shields.io/badge/React-19.3-61DAFB?style=for-the-badge&logo=react&logoColor=black)

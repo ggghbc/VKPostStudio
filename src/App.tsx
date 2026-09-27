@@ -30,7 +30,7 @@ import {
 	Theme,
 	LiveWallPostItem,
 } from "./types";
-import { Lang, translations } from "./services/i18n";
+import { Lang, translations, formatNormalizedError } from "./services/i18n";
 import { format } from "date-fns";
 
 export default function App() {
@@ -422,8 +422,8 @@ export default function App() {
 			}
 			if (event.payload?.error) {
 				setNotice({
-					title: "Ошибка отправки",
-					message: String(event.payload.error),
+					title: lang === "ru" ? "Ошибка отправки" : "Sending Error",
+					message: formatNormalizedError(String(event.payload.error), lang),
 				});
 			}
 		}).then((f) => {
@@ -1318,7 +1318,7 @@ export default function App() {
 			<NoticeModal
 				show={notice !== null}
 				title={notice?.title || ""}
-				message={notice?.message || ""}
+				message={formatNormalizedError(notice?.message || "", lang)}
 				onClose={() => setNotice(null)}
 			/>
 

@@ -157,6 +157,19 @@ pub fn run() {
                     let _ = sqlx::query("ALTER TABLE patterns ADD COLUMN interval_days INTEGER NOT NULL DEFAULT 1").execute(&pool).await;
                 }
 
+                // Миграции таблицы accounts
+                let acc_columns: Vec<String> = sqlx::query("PRAGMA table_info(accounts)")
+                    .fetch_all(&pool)
+                    .await
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|r| r.get::<String, _>("name"))
+                    .collect();
+
+                if !acc_columns.contains(&"secret".to_string()) {
+                    let _ = sqlx::query("ALTER TABLE accounts ADD COLUMN secret TEXT").execute(&pool).await;
+                }
+
                 // Реестр файлов для отслеживания и очистки
                 let _ = sqlx::query(
                     "CREATE TABLE IF NOT EXISTS tracked_files (
@@ -200,6 +213,51 @@ pub fn run() {
 
                 let vk_client = active_token.map(VkClient::new);
 
+                // Фоновое фолбэк-получение секретов сессии для существующих аккаунтов
+                let pool_clone = pool.clone();
+                let app_dir_clone = app_dir.clone();
+                tokio::spawn(async move {
+                    let rows = sqlx::query("SELECT id, token, secret FROM accounts")
+                        .fetch_all(&pool_clone)
+                        .await
+                        .unwrap_or_default();
+                    let http = reqwest::Client::builder()
+                        .timeout(std::time::Duration::from_secs(15))
+                        .build()
+                        .unwrap_or_default();
+                    let device_mgr = vk::device::VkDeviceManager::load_or_generate(&app_dir_clone);
+
+                    for r in rows {
+                        let acc_id: i64 = r.get("id");
+                        let db_sec: Option<String> = r.get("secret");
+                        let secret = services::token_vault::TokenVault::get_secret(
+                            acc_id,
+                            db_sec.as_deref().unwrap_or(""),
+                        );
+                        if secret.trim().is_empty() {
+                            let db_tok: String = r.get("token");
+                            let token = services::token_vault::TokenVault::get_token(acc_id, &db_tok);
+                            if !token.is_empty() {
+                                if let Ok(sec) = services::vk_auth::exchange_token_for_secret(
+                                    &http,
+                                    &token,
+                                    device_mgr.get_device_id(),
+                                )
+                                .await
+                                {
+                                    let _ = services::token_vault::TokenVault::store_secret(acc_id, &sec);
+                                    let _ = sqlx::query(
+                                        "UPDATE accounts SET secret = 'keyring_protected' WHERE id = ?",
+                                    )
+                                    .bind(acc_id)
+                                    .execute(&pool_clone)
+                                    .await;
+                                }
+                            }
+                        }
+                    }
+                });
+
                 app_handle.manage(AppState {
                     db: pool,
                     active_vk: Arc::new(Mutex::new(vk_client)),
@@ -215,6 +273,7 @@ pub fn run() {
             commands::account::delete_account,
             commands::account::add_token,
             commands::account::clean_expired_tokens,
+            commands::account::refresh_active_token,
             commands::account::get_targets,
             commands::pattern::get_patterns,
             commands::pattern::create_pattern,
